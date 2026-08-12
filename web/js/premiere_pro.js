@@ -162,6 +162,9 @@ const STYLES = `
 .bsai-pp-clip-name {
     color: #ddd; font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.bsai-pp-clip-dur {
+    color: #888; font-size: 8px; font-family: monospace;
+}
 .bsai-pp-clip-num {
     position: absolute; top: 2px; left: 2px; background: rgba(74,144,217,0.8);
     color: #fff; font-size: 8px; padding: 1px 4px; border-radius: 2px; font-weight: 600;
@@ -608,9 +611,17 @@ class TimelineEditor {
             maxDuration = Math.max(maxDuration, dur);
         }
 
+        const scrollEl = container.parentElement;
+        const containerWidth = scrollEl?.clientWidth || 1000;
+        const availableWidth = containerWidth - 150 - 20;
+        const totalDuration = Math.max(maxDuration, 10);
+        this._pps = Math.max(6, Math.min(30, availableWidth / totalDuration));
+        this._totalDuration = totalDuration;
+
         const ruler = document.createElement("div");
         ruler.className = "bsai-pp-time-ruler";
-        ruler.innerHTML = `<div class="bsai-pp-ruler-spacer"></div><div class="bsai-pp-ruler-marks">${this._renderRulerMarks(maxDuration)}</div>`;
+        const rulerWidth = Math.round((maxDuration + 10) * (this._pps || 15));
+        ruler.innerHTML = `<div class="bsai-pp-ruler-spacer"></div><div class="bsai-pp-ruler-marks" style="min-width:${rulerWidth}px">${this._renderRulerMarks(maxDuration)}</div>`;
         container.appendChild(ruler);
 
         const vLabel = document.createElement("div");
@@ -640,11 +651,12 @@ class TimelineEditor {
     _renderRulerMarks(totalDuration) {
         if (totalDuration <= 0) totalDuration = 30;
         const interval = totalDuration > 120 ? 30 : totalDuration > 60 ? 15 : totalDuration > 30 ? 10 : 5;
+        const pps = this._pps || 15;
         const span = totalDuration + interval;
         let html = "";
         for (let t = 0; t <= span; t += interval) {
-            const pct = (t / span) * 100;
-            html += `<span class="bsai-pp-ruler-mark" style="left:${pct}%">${formatTime(t)}</span>`;
+            const left = t * pps;
+            html += `<span class="bsai-pp-ruler-mark" style="left:${left}px">${formatTime(t)}</span>`;
         }
         return html;
     }
@@ -682,17 +694,23 @@ class TimelineEditor {
 
         const content = document.createElement("div");
         content.className = "bsai-pp-track-content";
+        const rulerWidth = Math.round(((this._totalDuration || 30) + 10) * (this._pps || 15));
+        content.style.minWidth = rulerWidth + "px";
         const trackClips = this._getClipsForTrack(trackType, trackIndex);
         if (trackClips.length === 0) {
             content.innerHTML = `<span class="bsai-pp-track-empty">空轨道</span>`;
         } else {
             trackClips.forEach((clip, i) => {
-                if (i > 0 && isVideo) {
+                if (i > 0) {
                     const arrow = document.createElement("div");
                     arrow.className = "bsai-pp-transition-arrow";
                     const transIn = clip.transition_in || "fade";
-                    arrow.innerHTML = `<span class="arrow-icon">${TRANSITION_ICONS[transIn] || "🌫️"}</span><span class="arrow-label">${TRANSITION_LABELS[transIn] || "淡入淡出"}</span>`;
-                    arrow.title = `点击切换过渡效果 (当前: ${TRANSITION_LABELS[transIn] || "淡入淡出"})`;
+                    const icon = isVideo ? (TRANSITION_ICONS[transIn] || "🌫️") : "🎵";
+                    const label = isVideo ? (TRANSITION_LABELS[transIn] || "淡入淡出") : "音频过渡";
+                    arrow.innerHTML = `<span class="arrow-icon">${icon}</span><span class="arrow-label">${label}</span>`;
+                    arrow.title = isVideo
+                        ? `点击切换过渡效果 (当前: ${TRANSITION_LABELS[transIn] || "淡入淡出"})`
+                        : `音频过渡 (当前: ${TRANSITION_LABELS[transIn] || "淡入淡出"})`;
                     const clipIdx = this.td.clips.indexOf(clip);
                     arrow.onclick = (e) => { e.stopPropagation(); this._showTransitionPopup(arrow, clipIdx); };
                     content.appendChild(arrow);
@@ -753,13 +771,27 @@ class TimelineEditor {
         if (clip.linked_id) block.classList.add("linked");
         if (clipIndex === this.selectedIndex) block.classList.add("selected");
         if (!clip.video_enabled && !clip.audio_enabled) block.classList.add("disabled");
+        const clipDur = (clip.trim_end || clip.duration || 0) - (clip.trim_start || 0);
+        const pps = this._pps || 15;
+        const width = Math.max(60, Math.round(clipDur * pps));
+        block.style.width = width + "px";
         let badges = "";
+        if (clip.linked_id) {
+            const linked = this.td.clips.find(c => c.id === clip.linked_id);
+            if (linked) {
+                const lDur = (linked.trim_end || linked.duration || 0) - (linked.trim_start || 0);
+                if (Math.abs(lDur - clipDur) > 0.01) {
+                    badges += `<span class="bsai-pp-clip-badge" style="color:#ff9800;" title="音视频时长不一致">⚠</span>`;
+                }
+            }
+        }
         if (!isVideo) {
             if (clip.audio_replacement) badges += `<span class="bsai-pp-clip-badge audio-replaced">🎵</span>`;
             else if (!clip.audio_enabled) badges += `<span class="bsai-pp-clip-badge">🔇</span>`;
         }
         const icon = isVideo ? "🎬" : "🎵";
         const thumbAttr = isVideo ? `data-thumb="${escapeHtml(clip.file_path)}"` : "";
+        const durLabel = formatTime(clipDur);
         block.innerHTML = `
             <div class="bsai-pp-clip-thumb" ${thumbAttr}>
                 <span class="placeholder">${icon}</span>
@@ -767,6 +799,7 @@ class TimelineEditor {
             </div>
             <div class="bsai-pp-clip-info">
                 <div class="bsai-pp-clip-name" title="${escapeHtml(clip.file_name)}">${escapeHtml(clip.file_name)}</div>
+                <div class="bsai-pp-clip-dur">${durLabel}</div>
             </div>`;
         block.onclick = () => { this.selectedIndex = clipIndex; this._renderAll(); };
         return block;
@@ -943,6 +976,7 @@ class TimelineEditor {
                 <button class="bsai-pp-btn" data-act="move-left">◀ 左移</button>
                 <button class="bsai-pp-btn" data-act="move-right">右移 ▶</button>
                 ${isVideo ? '<button class="bsai-pp-btn" data-act="replace-video">替换视频文件</button>' : ""}
+                ${isLinked ? '<button class="bsai-pp-btn" data-act="sync-linked">🔄 同步链接</button>' : ""}
                 <button class="bsai-pp-btn bsai-pp-btn-danger" data-act="delete">🗑 删除片段</button>
             </div>`;
         panel.innerHTML = html;
@@ -996,6 +1030,8 @@ class TimelineEditor {
             this._save();
             this._renderTimeline();
         };
+        const syncBtn = panel.querySelector('[data-act="sync-linked"]');
+        if (syncBtn) syncBtn.onclick = () => this._syncLinkedClip(clip);
     }
 
     _toggleLink(clip) {
@@ -1009,7 +1045,14 @@ class TimelineEditor {
             if (partner) {
                 clip.linked_id = partner.id;
                 partner.linked_id = clip.id;
-                this._toast("已建立音视频链接", "success");
+                const src = clip.track_type === "video" ? clip : partner;
+                const dst = clip.track_type === "video" ? partner : clip;
+                dst.trim_start = src.trim_start;
+                dst.trim_end = src.trim_end;
+                dst.transition_in = src.transition_in;
+                dst.transition_out = src.transition_out;
+                dst.transition_duration = src.transition_duration;
+                this._toast("已建立音视频链接并同步裁剪参数", "success");
             } else {
                 this._toast("没有可链接的对应片段", "info");
                 return;
@@ -1017,6 +1060,22 @@ class TimelineEditor {
         }
         this._save();
         this._renderAll();
+    }
+
+    _syncLinkedClip(clip) {
+        if (!clip.linked_id) { this._toast("该片段未链接", "info"); return; }
+        const linked = this.td.clips.find(c => c.id === clip.linked_id);
+        if (!linked) return;
+        const src = clip.track_type === "video" ? clip : linked;
+        const dst = clip.track_type === "video" ? linked : clip;
+        dst.trim_start = src.trim_start;
+        dst.trim_end = src.trim_end;
+        dst.transition_in = src.transition_in;
+        dst.transition_out = src.transition_out;
+        dst.transition_duration = src.transition_duration;
+        this._save();
+        this._renderAll();
+        this._toast("已同步音视频裁剪参数", "success");
     }
 
     _renderFooter() {

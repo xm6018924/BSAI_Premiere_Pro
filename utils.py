@@ -831,7 +831,8 @@ def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
         combine_cmd = [
             ffmpeg, "-y", "-loglevel", "error",
             "-i", final_video, "-i", final_audio,
-            "-map", "0:v:0", "-map", "1:a:0",
+            "-filter_complex", "[1:a]apad[aout]",
+            "-map", "0:v:0", "-map", "[aout]",
             "-c:v", video_codec, "-preset", "medium", "-crf", crf,
             "-c:a", "aac", "-b:a", "192k",
             "-pix_fmt", "yuv420p",
@@ -839,7 +840,7 @@ def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
             "-shortest",
             output_path
         ]
-        print(f"[BSAI Premiere Pro] Combining video and audio -> {output_path}")
+        print(f"[BSAI Premiere Pro] Combining video and audio (apad) -> {output_path}")
         result = subprocess.run(combine_cmd, capture_output=True, text=True, timeout=600)
         if result.returncode != 0:
             return None, f"Failed to combine video and audio:\n{result.stderr}"
