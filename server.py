@@ -13,6 +13,10 @@ from .utils import (
     _resolve_directory,
 )
 
+# In-memory timeline data store, keyed by node unique_id.
+# Frontend POSTs timeline JSON here; backend render() reads from here.
+_timeline_store = {}
+
 
 @PromptServer.instance.routes.get("/bsai_premiere_pro/scan")
 async def scan_directory(request):
@@ -167,3 +171,23 @@ async def browse_directories(request):
         return web.json_response({"error": f"目录扫描超时: {path}", "path": path}, status=504)
     except Exception as e:
         return web.json_response({"error": str(e), "path": path}, status=500)
+
+
+@PromptServer.instance.routes.post("/bsai_premiere_pro/timeline_save")
+async def save_timeline(request):
+    try:
+        body = await request.json()
+        node_id = str(body.get("node_id", ""))
+        timeline_data = body.get("timeline_data", '{"clips":[],"known_files":[]}')
+        if node_id:
+            _timeline_store[node_id] = timeline_data
+        return web.json_response({"ok": True})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+
+@PromptServer.instance.routes.get("/bsai_premiere_pro/timeline_load")
+async def load_timeline(request):
+    node_id = str(request.query.get("node_id", ""))
+    data = _timeline_store.get(node_id, '{"clips":[],"known_files":[]}')
+    return web.json_response({"timeline_data": data})

@@ -467,10 +467,8 @@ class AutoImporter {
     }
 
     async addNewFiles(files) {
-        const tdWidget = this.getWidget("timeline_data");
-        if (!tdWidget) return;
         let td;
-        try { td = JSON.parse(tdWidget.value); } catch { td = { clips: [], known_files: [], filter_audio_only: true }; }
+        try { td = JSON.parse(this.node.properties?.bsai_td || '{}'); } catch { td = { clips: [], known_files: [], filter_audio_only: true }; }
         if (!td.clips) td.clips = [];
         if (!td.known_files) td.known_files = [];
         if (td.filter_audio_only === undefined) td.filter_audio_only = true;
@@ -513,8 +511,15 @@ class AutoImporter {
                 console.error("[BSAI PP] Failed to add file:", file.file_name, e);
             }
         }
-        tdWidget.value = JSON.stringify(td);
+        const tdJson = JSON.stringify(td);
+        if (!this.node.properties) this.node.properties = {};
+        this.node.properties.bsai_td = tdJson;
         this.updateNodeTitle(td);
+        api.fetchApi("/bsai_premiere_pro/timeline_save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ node_id: String(this.node.id), timeline_data: tdJson }),
+        }).catch(() => {});
         if (this._editor) this._editor.refresh();
     }
 
@@ -548,10 +553,10 @@ class TimelineEditor {
     }
 
     _load() {
-        const w = this.node.widgets?.find(w => w.name === "timeline_data");
-        if (w?.value) {
+        const val = this.node.properties?.bsai_td;
+        if (val) {
             try {
-                const td = JSON.parse(w.value);
+                const td = JSON.parse(val);
                 if (!td.clips) td.clips = [];
                 if (!td.known_files) td.known_files = [];
                 if (td.filter_audio_only === undefined) td.filter_audio_only = true;
@@ -598,10 +603,16 @@ class TimelineEditor {
     }
 
     _save() {
-        const w = this.node.widgets?.find(w => w.name === "timeline_data");
-        if (w) w.value = JSON.stringify(this.td);
+        const json = JSON.stringify(this.td);
+        if (!this.node.properties) this.node.properties = {};
+        this.node.properties.bsai_td = json;
         const importer = importerMap.get(this.node.id);
         if (importer) importer.updateNodeTitle(this.td);
+        api.fetchApi("/bsai_premiere_pro/timeline_save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ node_id: String(this.node.id), timeline_data: json }),
+        }).catch(() => {});
     }
 
     _getWidget(name) {
@@ -1811,8 +1822,9 @@ app.registerExtension({
                             if (dirWidget) dirWidget.value = selected;
                             const importer = importerMap.get(node.id);
                             if (importer) {
-                                const tdW = node.widgets?.find(w => w.name === "timeline_data");
-                                importer.updateNodeTitle(JSON.parse(tdW?.value || '{"clips":[]}'));
+                                try {
+                                    importer.updateNodeTitle(JSON.parse(node.properties?.bsai_td || '{"clips":[]}'));
+                                } catch {}
                             }
                         }
                     });
@@ -1827,41 +1839,21 @@ app.registerExtension({
             }
         }
 
-        function _initTdValue(node) {
-            const w = node.widgets?.find(w2 => w2.name === "timeline_data");
-            if (w && (!w.value || w.value === "")) {
-                w.value = '{"clips":[],"known_files":[]}';
+        function _initTdProperty(node) {
+            if (!node.properties) node.properties = {};
+            if (!node.properties.bsai_td) {
+                node.properties.bsai_td = '{"clips":[],"known_files":[]}';
             }
         }
 
-        // Override computeSize to exclude timeline_data from node sizing
-        const originalComputeSize = nodeType.prototype.computeSize;
-        nodeType.prototype.computeSize = function () {
-            if (!this.widgets) return originalComputeSize.apply(this, arguments);
-            const idx = this.widgets.findIndex(w => w.name === "timeline_data");
-            if (idx < 0) return originalComputeSize.apply(this, arguments);
-            const td = this.widgets.splice(idx, 1)[0];
-            try {
-                return originalComputeSize.apply(this, arguments);
-            } finally {
-                this.widgets.push(td);
-            }
-        };
-
-        // Override drawNodeWidgets to skip timeline_data during rendering
-        const originalDrawWidgets = nodeType.prototype.drawNodeWidgets;
-        nodeType.prototype.drawNodeWidgets = function (ctx) {
-            if (!this.widgets) return originalDrawWidgets?.apply(this, arguments);
-            _ensureButtons(this);
-            const idx = this.widgets.findIndex(w => w.name === "timeline_data");
-            if (idx < 0) return originalDrawWidgets?.apply(this, arguments);
-            const td = this.widgets.splice(idx, 1)[0];
-            try {
-                return originalDrawWidgets?.apply(this, arguments);
-            } finally {
-                this.widgets.push(td);
-            }
-        };
+        function _syncToServer(node) {
+            const json = node.properties?.bsai_td || '{"clips":[],"known_files":[]}';
+            api.fetchApi("/bsai_premiere_pro/timeline_save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ node_id: String(node.id), timeline_data: json }),
+            }).catch(() => {});
+        }
 
         function _forceResize(node) {
             requestAnimationFrame(() => {
@@ -1875,14 +1867,14 @@ app.registerExtension({
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
-            _initTdValue(this);
+            _initTdProperty(this);
             _ensureButtons(this);
+            _syncToServer(this);
             const importer = new AutoImporter(this);
             importerMap.set(this.id, importer);
             importer.start();
             try {
-                const tdW = this.widgets?.find(w => w.name === "timeline_data");
-                importer.updateNodeTitle(JSON.parse(tdW?.value || '{"clips":[]}'));
+                importer.updateNodeTitle(JSON.parse(this.properties?.bsai_td || '{"clips":[]}'));
             } catch {}
             _forceResize(this);
         };
@@ -1902,10 +1894,19 @@ app.registerExtension({
         };
 
         const onConfigure = nodeType.prototype.onConfigure;
-        nodeType.prototype.onConfigure = function () {
+        nodeType.prototype.onConfigure = function (info) {
             const result = onConfigure?.apply(this, arguments);
-            _initTdValue(this);
+            _initTdProperty(this);
+            // Migrate old timeline_data from widgets_values if present
+            if ((!this.properties.bsai_td || this.properties.bsai_td === '{"clips":[],"known_files":[]}') && info?.widgets_values) {
+                for (const v of info.widgets_values) {
+                    if (typeof v === "string" && v.includes('"clips"')) {
+                        try { JSON.parse(v); this.properties.bsai_td = v; break; } catch {}
+                    }
+                }
+            }
             _ensureButtons(this);
+            _syncToServer(this);
             const importer = importerMap.get(this.id);
             if (!importer) {
                 const imp = new AutoImporter(this);
@@ -1914,8 +1915,7 @@ app.registerExtension({
             }
             if (importer) {
                 try {
-                    const tdW = this.widgets?.find(w => w.name === "timeline_data");
-                    importer.updateNodeTitle(JSON.parse(tdW?.value || '{"clips":[]}'));
+                    importer.updateNodeTitle(JSON.parse(this.properties?.bsai_td || '{"clips":[]}'));
                 } catch {}
             }
             _forceResize(this);
@@ -1926,10 +1926,9 @@ app.registerExtension({
         nodeType.prototype.onExecuted = function (message) {
             onExecuted?.apply(this, arguments);
             if (message?.timeline_data) {
-                const tdWidget = this.widgets?.find(w => w.name === "timeline_data");
-                if (tdWidget) {
-                    tdWidget.value = message.timeline_data;
-                }
+                if (!this.properties) this.properties = {};
+                this.properties.bsai_td = message.timeline_data;
+                _syncToServer(this);
                 const importer = importerMap.get(this.id);
                 if (importer) {
                     try {

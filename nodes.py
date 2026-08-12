@@ -53,14 +53,13 @@ class BSAIPremiereProTimeline:
                 "frame_rate": ("FLOAT", {
                     "default": 24, "min": 1, "max": 120, "step": 1,
                 }),
-                "timeline_data": ("STRING", {
-                    "default": '{"clips":[],"known_files":[]}',
-                    "multiline": False,
-                }),
             },
             "optional": {
                 "image": ("IMAGE",),
                 "audio": ("AUDIO",),
+            },
+            "hidden": {
+                "unique_id": "UNIQUE_ID",
             },
         }
 
@@ -72,7 +71,10 @@ class BSAIPremiereProTimeline:
 
     def render(self, watch_directory, auto_import, default_transition,
                transition_duration, output_filename, format,
-               pix_fmt, crf, frame_rate, timeline_data, image=None, audio=None):
+               pix_fmt, crf, frame_rate, image=None, audio=None, unique_id=None):
+
+        from .server import _timeline_store
+        timeline_data = _timeline_store.get(unique_id, '{"clips":[],"known_files":[]}')
 
         if not timeline_data or not timeline_data.strip():
             timeline_data = '{"clips":[],"known_files":[]}'
@@ -183,6 +185,7 @@ class BSAIPremiereProTimeline:
         }
         if timeline_updated:
             ui["timeline_data"] = json.dumps(data)
+            _timeline_store[unique_id] = json.dumps(data)
         if merge_msg:
             ui["merge_msg"] = merge_msg
 
