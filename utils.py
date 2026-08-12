@@ -618,17 +618,24 @@ def _mix_audio_tracks(track_files, temp_dir):
     return output_file
 
 
-def process_and_merge(timeline_data, output_filename, output_format, video_codec,
-                      quality, default_transition, transition_duration):
+def process_and_merge(timeline_data, output_filename, format_str, pix_fmt,
+                      crf, frame_rate, default_transition, transition_duration):
     ffmpeg = get_ffmpeg()
     if not ffmpeg:
         return None, "ffmpeg not found"
     clips = timeline_data.get("clips", [])
 
-    # Detect multi-track mode: any clip has track_type field
+    codec_map = {"h264": "libx264", "h265": "libx265", "vp9": "libvpx-vp9"}
+    parts = format_str.split("/")
+    codec_key = parts[1].split("-")[0] if len(parts) > 1 else "h264"
+    container = parts[1].split("-", 1)[1] if len(parts) > 1 and "-" in parts[1] else "mp4"
+    video_codec = codec_map.get(codec_key, "libx264")
+    output_format = container
+
+    crf = str(int(crf)) if crf else "19"
+
     is_multitrack = any("track_type" in c for c in clips)
 
-    # Filter enabled clips
     if is_multitrack:
         enabled_clips = []
         for c in clips:
@@ -640,7 +647,6 @@ def process_and_merge(timeline_data, output_filename, output_format, video_codec
                 if c.get("audio_enabled", True):
                     enabled_clips.append(c)
             else:
-                # Clip without track_type in multi-track mode: treat as enabled
                 if c.get("video_enabled", True) or c.get("audio_enabled", True):
                     enabled_clips.append(c)
     else:
@@ -649,19 +655,15 @@ def process_and_merge(timeline_data, output_filename, output_format, video_codec
     if not enabled_clips:
         return None, "No clips to merge"
 
-    # Determine target dimensions and FPS from all enabled clips
     target_w = 0
     target_h = 0
-    target_fps = 30.0
     for clip in enabled_clips:
         w = clip.get("width", 0)
         h = clip.get("height", 0)
-        fps = clip.get("fps", 30)
         if w > 0 and h > 0:
             if w > target_w or (w == target_w and h > target_h):
                 target_w = w
                 target_h = h
-            target_fps = max(target_fps, float(fps))
     if target_w == 0:
         target_w = 1920
     if target_h == 0:
@@ -671,10 +673,8 @@ def process_and_merge(timeline_data, output_filename, output_format, video_codec
     if target_h % 2 != 0:
         target_h += 1
 
-    crf_map = {"high": "18", "medium": "23", "low": "28"}
-    crf = crf_map.get(quality, "18")
+    target_fps = float(frame_rate) if frame_rate else 24.0
 
-    # Resolve output path
     try:
         import folder_paths
         output_dir = folder_paths.get_output_directory()
@@ -692,13 +692,13 @@ def process_and_merge(timeline_data, output_filename, output_format, video_codec
         if is_multitrack:
             return _process_multitrack(
                 timeline_data, enabled_clips, temp_dir, output_path,
-                target_w, target_h, target_fps, crf, video_codec,
+                target_w, target_h, target_fps, crf, video_codec, pix_fmt,
                 default_transition, transition_duration, ffmpeg
             )
         else:
             return _process_legacy(
                 enabled_clips, temp_dir, output_path,
-                target_w, target_h, target_fps, crf, video_codec,
+                target_w, target_h, target_fps, crf, video_codec, pix_fmt,
                 default_transition, transition_duration, ffmpeg
             )
     except Exception as e:
@@ -708,7 +708,7 @@ def process_and_merge(timeline_data, output_filename, output_format, video_codec
 
 
 def _process_legacy(enabled_clips, temp_dir, output_path,
-                    target_w, target_h, target_fps, crf, video_codec,
+                    target_w, target_h, target_fps, crf, video_codec, pix_fmt,
                     default_transition, transition_duration, ffmpeg):
     """Legacy mode: sequential concat with both video and audio from each clip."""
     processed_files = []
@@ -740,7 +740,7 @@ def _process_legacy(enabled_clips, temp_dir, output_path,
         "-f", "concat", "-safe", "0", "-i", concat_file,
         "-c:v", video_codec, "-preset", "medium", "-crf", crf,
         "-c:a", "aac", "-b:a", "192k",
-        "-pix_fmt", "yuv420p",
+        "-pix_fmt", pix_fmt,
         "-movflags", "+faststart",
         output_path
     ]
@@ -753,7 +753,7 @@ def _process_legacy(enabled_clips, temp_dir, output_path,
 
 
 def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
-                        target_w, target_h, target_fps, crf, video_codec,
+                        target_w, target_h, target_fps, crf, video_codec, pix_fmt,
                         default_transition, transition_duration, ffmpeg):
     """Multi-track mode: process video and audio tracks separately, then combine."""
     video_tracks = timeline_data.get("video_tracks", [])
@@ -836,7 +836,7 @@ def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
             "-map", "0:v:0", "-map", "[aout]",
             "-c:v", video_codec, "-preset", "medium", "-crf", crf,
             "-c:a", "aac", "-b:a", "192k",
-            "-pix_fmt", "yuv420p",
+            "-pix_fmt", pix_fmt,
             "-movflags", "+faststart",
             "-shortest",
             output_path
@@ -853,7 +853,7 @@ def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
             "-i", final_video,
             "-map", "0:v:0",
             "-c:v", video_codec, "-preset", "medium", "-crf", crf,
-            "-pix_fmt", "yuv420p",
+            "-pix_fmt", pix_fmt,
             "-movflags", "+faststart",
             output_path
         ]
@@ -871,7 +871,7 @@ def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
             "-map", "1:v:0", "-map", "0:a:0",
             "-c:v", video_codec, "-preset", "medium", "-crf", crf,
             "-c:a", "aac", "-b:a", "192k",
-            "-pix_fmt", "yuv420p",
+            "-pix_fmt", pix_fmt,
             "-shortest",
             "-movflags", "+faststart",
             output_path

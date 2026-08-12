@@ -64,10 +64,11 @@ async def render_video(request):
         data = await request.json()
         timeline_str = data.get("timeline_data", "")
         output_filename = data.get("output_filename", "premiere_pro_output")
-        output_format = data.get("output_format", "mp4")
-        video_codec = data.get("video_codec", "libx264")
-        quality = data.get("quality", "high")
-        default_transition = data.get("default_transition", "cut")
+        format_str = data.get("format", "video/h264-mp4")
+        pix_fmt = data.get("pix_fmt", "yuv420p")
+        crf = data.get("crf", 19)
+        frame_rate = data.get("frame_rate", 24)
+        default_transition = data.get("default_transition", "fade")
         transition_duration = float(data.get("transition_duration", 0.5))
 
         if not timeline_str:
@@ -79,8 +80,8 @@ async def render_video(request):
             return web.json_response({"error": "No clips to merge"})
 
         output_path, error = process_and_merge(
-            timeline_data, output_filename, output_format, video_codec,
-            quality, default_transition, transition_duration
+            timeline_data, output_filename, format_str, pix_fmt,
+            crf, frame_rate, default_transition, transition_duration
         )
 
         if error:

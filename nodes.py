@@ -40,14 +40,18 @@ class BSAIPremiereProTimeline:
                     "default": "premiere_pro_output",
                     "multiline": False,
                 }),
-                "output_format": (["mp4", "mov", "mkv", "webm"], {
-                    "default": "mp4",
+                "format": (["video/h264-mp4", "video/h265-mp4", "video/h264-mkv",
+                             "video/h265-mkv", "video/h264-mov", "video/vp9-webm"], {
+                    "default": "video/h264-mp4",
                 }),
-                "video_codec": (["libx264", "libx265", "libvpx-vp9", "mpeg4"], {
-                    "default": "libx264",
+                "pix_fmt": (["yuv420p", "yuv444p", "yuv422p", "rgb24", "bgr0"], {
+                    "default": "yuv420p",
                 }),
-                "quality": (["high", "medium", "low"], {
-                    "default": "high",
+                "crf": ("FLOAT", {
+                    "default": 19, "min": 0, "max": 51, "step": 1,
+                }),
+                "frame_rate": ("FLOAT", {
+                    "default": 24, "min": 1, "max": 120, "step": 1,
                 }),
                 "timeline_data": ("STRING", {
                     "default": '{"clips":[],"known_files":[]}',
@@ -67,8 +71,8 @@ class BSAIPremiereProTimeline:
     OUTPUT_NODE = True
 
     def render(self, watch_directory, auto_import, default_transition,
-               transition_duration, output_filename, output_format,
-               video_codec, quality, timeline_data, image=None, audio=None):
+               transition_duration, output_filename, format,
+               pix_fmt, crf, frame_rate, timeline_data, image=None, audio=None):
 
         if not timeline_data or not timeline_data.strip():
             timeline_data = '{"clips":[],"known_files":[]}'
@@ -160,8 +164,8 @@ class BSAIPremiereProTimeline:
             return {"result": ("",), "ui": ui}
 
         output_path, error = process_and_merge(
-            data, output_filename, output_format, video_codec,
-            quality, default_transition, transition_duration
+            data, output_filename, format, pix_fmt, crf, frame_rate,
+            default_transition, transition_duration
         )
 
         if error:

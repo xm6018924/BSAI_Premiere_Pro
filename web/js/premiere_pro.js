@@ -1712,9 +1712,10 @@ class TimelineEditor {
             const body = {
                 timeline_data: JSON.stringify(this.td),
                 output_filename: this._getWidgetValue("output_filename", "premiere_pro_output"),
-                output_format: this._getWidgetValue("output_format", "mp4"),
-                video_codec: this._getWidgetValue("video_codec", "libx264"),
-                quality: this._getWidgetValue("quality", "high"),
+                format: this._getWidgetValue("format", "video/h264-mp4"),
+                pix_fmt: this._getWidgetValue("pix_fmt", "yuv420p"),
+                crf: parseFloat(this._getWidgetValue("crf", 19)),
+                frame_rate: parseFloat(this._getWidgetValue("frame_rate", 24)),
                 default_transition: this._getWidgetValue("default_transition", "fade"),
                 transition_duration: parseFloat(this._getWidgetValue("transition_duration", 0.5)),
             };
@@ -1799,66 +1800,83 @@ app.registerExtension({
     async beforeRegisterNodeDef(nodeType, nodeData, appInstance) {
         if (nodeData.name !== NODE_TYPE) return;
 
+        function _hideTdWidget(node) {
+            if (!node.widgets) return;
+            const w = node.widgets.find(w2 => w2.name === "timeline_data");
+            if (w) {
+                w.computeSize = () => [0, 0];
+                w.hidden = true;
+                w.draw = function() {};
+                w.mouse = function() {};
+                if (!w.value || w.value === "") {
+                    w.value = '{"clips":[],"known_files":[]}';
+                }
+            }
+        }
+
+        function _ensureButtons(node) {
+            if (!node.widgets) node.widgets = [];
+            const hasBrowse = node.widgets.some(w => w.name === "browse_directory");
+            if (!hasBrowse) {
+                node.addWidget("button", "browse_directory", "📂 浏览监视目录", () => {
+                    const dirWidget = node.widgets?.find(w => w.name === "watch_directory");
+                    browseDirectoryDialog(dirWidget?.value || "").then(selected => {
+                        if (selected) {
+                            if (dirWidget) dirWidget.value = selected;
+                            const importer = importerMap.get(node.id);
+                            if (importer) {
+                                const tdW = node.widgets?.find(w => w.name === "timeline_data");
+                                importer.updateNodeTitle(JSON.parse(tdW?.value || '{"clips":[]}'));
+                            }
+                        }
+                    });
+                });
+            }
+            const hasEditor = node.widgets.some(w => w.name === "open_editor");
+            if (!hasEditor) {
+                node.addWidget("button", "open_editor", "🎬 打开时间轴编辑器", () => {
+                    const editor = new TimelineEditor(node);
+                    editor.open();
+                });
+            }
+        }
+
+        function _forceResize(node) {
+            requestAnimationFrame(() => {
+                _hideTdWidget(node);
+                _ensureButtons(node);
+                const computed = node.computeSize();
+                node.setSize([Math.max(420, computed[0]), Math.max(computed[1], 260)]);
+                node.setDirtyCanvas(true, true);
+                requestAnimationFrame(() => {
+                    _hideTdWidget(node);
+                    const c2 = node.computeSize();
+                    node.setSize([Math.max(420, c2[0]), Math.max(c2[1], 260)]);
+                    node.setDirtyCanvas(true, true);
+                });
+            });
+        }
+
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
-
-            // Hide the timeline_data widget
-            const tdWidget = this.widgets?.find(w => w.name === "timeline_data");
-            if (tdWidget) {
-                tdWidget.computeSize = () => [0, -4];
-                tdWidget.hidden = true;
-                tdWidget.draw = () => {};
-                tdWidget.mouse = () => {};
-                if (!tdWidget.value || tdWidget.value === "") {
-                    tdWidget.value = '{"clips":[],"known_files":[]}';
-                }
-            }
-
-            // Add button to browse watch directory
-            this.addWidget("button", "browse_directory", "📂 浏览监视目录", async () => {
-                const dirWidget = this.widgets?.find(w => w.name === "watch_directory");
-                const selected = await browseDirectoryDialog(dirWidget?.value || "");
-                if (selected) {
-                    if (dirWidget) dirWidget.value = selected;
-                    const importer = importerMap.get(this.id);
-                    if (importer) importer.updateNodeTitle(
-                        JSON.parse(this.widgets?.find(w => w.name === "timeline_data")?.value || '{"clips":[]}')
-                    );
-                }
-            });
-
-            // Add button to open the editor
-            this.addWidget("button", "open_editor", "🎬 打开时间轴编辑器", () => {
-                const editor = new TimelineEditor(this);
-                editor.open();
-            });
-
-            // Start auto-import polling
+            _hideTdWidget(this);
+            _ensureButtons(this);
             const importer = new AutoImporter(this);
             importerMap.set(this.id, importer);
             importer.start();
-
-            // Update title
             try {
-                const td = JSON.parse(tdWidget?.value || '{"clips":[]}');
-                importer.updateNodeTitle(td);
+                const tdW = this.widgets?.find(w => w.name === "timeline_data");
+                importer.updateNodeTitle(JSON.parse(tdW?.value || '{"clips":[]}'));
             } catch {}
+            _forceResize(this);
+        };
 
-            // Force resize after layout to hide timeline_data widget
-            const self = this;
-            setTimeout(() => {
-                const w = self.widgets?.find(w2 => w2.name === "timeline_data");
-                if (w) {
-                    w.computeSize = () => [0, -4];
-                    w.hidden = true;
-                    w.draw = () => {};
-                    w.mouse = () => {};
-                }
-                const computed = self.computeSize();
-                self.setSize([Math.max(420, computed[0]), computed[1]]);
-                self.setDirtyCanvas(true, true);
-            }, 50);
+        const onAdded = nodeType.prototype.onAdded;
+        nodeType.prototype.onAdded = function () {
+            onAdded?.apply(this, arguments);
+            _ensureButtons(this);
+            _forceResize(this);
         };
 
         const onRemoved = nodeType.prototype.onRemoved;
@@ -1871,33 +1889,21 @@ app.registerExtension({
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function () {
             const result = onConfigure?.apply(this, arguments);
-            const tdWidget = this.widgets?.find(w => w.name === "timeline_data");
-            if (tdWidget) {
-                tdWidget.computeSize = () => [0, -4];
-                tdWidget.hidden = true;
-                tdWidget.draw = () => {};
-                tdWidget.mouse = () => {};
-                const importer = importerMap.get(this.id);
-                if (importer) {
-                    try {
-                        const td = JSON.parse(tdWidget.value || '{"clips":[]}');
-                        importer.updateNodeTitle(td);
-                    } catch {}
-                }
+            _hideTdWidget(this);
+            _ensureButtons(this);
+            const importer = importerMap.get(this.id);
+            if (!importer) {
+                const imp = new AutoImporter(this);
+                importerMap.set(this.id, imp);
+                imp.start();
             }
-            const self = this;
-            setTimeout(() => {
-                const w = self.widgets?.find(w2 => w2.name === "timeline_data");
-                if (w) {
-                    w.computeSize = () => [0, -4];
-                    w.hidden = true;
-                    w.draw = () => {};
-                    w.mouse = () => {};
-                }
-                const computed = self.computeSize();
-                self.setSize([Math.max(420, computed[0]), computed[1]]);
-                self.setDirtyCanvas(true, true);
-            }, 50);
+            if (importer) {
+                try {
+                    const tdW = this.widgets?.find(w => w.name === "timeline_data");
+                    importer.updateNodeTitle(JSON.parse(tdW?.value || '{"clips":[]}'));
+                } catch {}
+            }
+            _forceResize(this);
             return result;
         };
 
@@ -1908,26 +1914,17 @@ app.registerExtension({
                 const tdWidget = this.widgets?.find(w => w.name === "timeline_data");
                 if (tdWidget) {
                     tdWidget.value = message.timeline_data;
-                    tdWidget.computeSize = () => [0, -4];
-                    tdWidget.hidden = true;
-                    tdWidget.draw = () => {};
-                    tdWidget.mouse = () => {};
-                    const importer = importerMap.get(this.id);
-                    if (importer) {
-                        try {
-                            const td = JSON.parse(message.timeline_data);
-                            importer.updateNodeTitle(td);
-                        } catch {}
-                        const editor = importer._editor;
-                        if (editor) editor.refresh();
-                    }
                 }
-                const self = this;
-                setTimeout(() => {
-                    const computed = self.computeSize();
-                    self.setSize([Math.max(420, computed[0]), computed[1]]);
-                    self.setDirtyCanvas(true, true);
-                }, 50);
+                _hideTdWidget(this);
+                const importer = importerMap.get(this.id);
+                if (importer) {
+                    try {
+                        importer.updateNodeTitle(JSON.parse(message.timeline_data));
+                    } catch {}
+                    const editor = importer._editor;
+                    if (editor) editor.refresh();
+                }
+                _forceResize(this);
             }
             if (message?.merge_msg) {
                 const editor = importerMap.get(this.id)?._editor;
