@@ -354,10 +354,11 @@ function browseDirectoryDialog(initialPath) {
                     listEl.querySelector("[data-retry]")?.addEventListener("click", () => loadDirs(path));
                     return;
                 }
-                currentPath = data.path;
-                pathDisplay.textContent = `当前: ${currentPath}`;
+                currentPath = data.path || "";
+                const isRoot = data.is_root === true;
+                pathDisplay.textContent = isRoot ? `当前: 我的电脑` : `当前: ${currentPath}`;
                 const manualInput = dialog.querySelector("[data-manual-path]");
-                if (manualInput && !manualInput.value) manualInput.value = currentPath;
+                if (manualInput && !manualInput.value && currentPath) manualInput.value = currentPath;
                 listEl.innerHTML = "";
                 if (data.dirs.length === 0) {
                     listEl.innerHTML = `<div style="color:#666;padding:10px;">📂 没有子目录</div>`;
@@ -365,8 +366,13 @@ function browseDirectoryDialog(initialPath) {
                 for (const dir of data.dirs) {
                     const item = document.createElement("div");
                     item.className = "bsai-pp-import-item";
-                    item.innerHTML = `<span>📁</span><span>${escapeHtml(dir)}</span>`;
-                    item.onclick = () => loadDirs(data.path + (data.path.endsWith("\\") || data.path.endsWith("/") ? "" : "\\") + dir);
+                    const icon = isRoot ? "💾" : "📁";
+                    item.innerHTML = `<span>${icon}</span><span>${escapeHtml(dir)}</span>`;
+                    if (isRoot) {
+                        item.onclick = () => loadDirs(dir);
+                    } else {
+                        item.onclick = () => loadDirs(currentPath + (currentPath.endsWith("\\") || currentPath.endsWith("/") ? "" : "\\") + dir);
+                    }
                     listEl.appendChild(item);
                 }
             } catch (e) {
@@ -383,12 +389,17 @@ function browseDirectoryDialog(initialPath) {
         loadDirs(initialPath || "");
 
         dialog.querySelector("[data-act='up']").onclick = async () => {
+            if (!currentPath) return;
             try {
                 const resp = await api.fetchApi(`/bsai_premiere_pro/browse?path=${encodeURIComponent(currentPath)}`);
                 const data = await resp.json();
-                if (data.parent !== undefined) loadDirs(data.parent);
+                if (data.parent !== undefined && data.parent !== "") {
+                    loadDirs(data.parent);
+                } else {
+                    loadDirs("");
+                }
             } catch (e) {
-                loadDirs(currentPath);
+                loadDirs("");
             }
         };
 
@@ -397,7 +408,7 @@ function browseDirectoryDialog(initialPath) {
             const val = manualInput.value.trim();
             if (val) loadDirs(val);
         };
-        dialog.querySelector("[data-act='go']").onclick = goToPath;
+        dialog.querySelector("[data-act='go"]').onclick = goToPath;
         manualInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); goToPath(); } };
 
         dialog.querySelector("[data-cancel]").onclick = () => {

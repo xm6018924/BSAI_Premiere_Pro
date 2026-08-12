@@ -10,6 +10,7 @@ from .utils import (
     scan_video_directory, scan_audio_files,
     get_video_info, generate_thumbnail,
     process_and_merge, format_time,
+    _resolve_directory,
 )
 
 
@@ -113,17 +114,27 @@ async def browse_directories(request):
     import asyncio
     raw_path = request.query.get("path", "")
     path = urllib.parse.unquote(raw_path)
-    if not path or path == "":
-        try:
-            import folder_paths
-            base = folder_paths.base_path
-            path = os.path.dirname(base)
-        except Exception:
-            path = os.getcwd()
 
     def _scan_dir(p):
+        if not p or p == "":
+            if os.name == "nt":
+                import ctypes
+                buf = ctypes.create_unicode_buffer(1024)
+                buf_len = ctypes.windll.kernel32.GetLogicalDriveStringsW(
+                    ctypes.sizeof(buf) // 2, buf
+                )
+                drives = []
+                for i in range(0, buf_len, 4):
+                    d = buf[i:i+3]
+                    if d and len(d) == 3 and d[1] == ":":
+                        drives.append(d)
+                return {"path": "", "parent": "", "dirs": drives, "is_root": True}, None
+            else:
+                p = "/"
+        if not os.path.exists(p):
+            return None, f"路径不存在: {p}"
         if not os.path.isdir(p):
-            return None, "Not a directory"
+            return None, f"不是目录: {p}"
         parent = os.path.dirname(p.rstrip(os.sep)) or p
         if parent == p:
             parent = ""
@@ -141,15 +152,17 @@ async def browse_directories(request):
         dirs.sort()
         return {"path": p, "parent": parent, "dirs": dirs}, None
 
+    resolved = _resolve_directory(path) if path else ""
+
     try:
         result, error = await asyncio.wait_for(
-            asyncio.to_thread(_scan_dir, path),
+            asyncio.to_thread(_scan_dir, resolved),
             timeout=10.0
         )
         if error:
             return web.json_response({"error": error, "path": path}, status=400)
         return web.json_response(result)
     except asyncio.TimeoutError:
-        return web.json_response({"error": "目录扫描超时", "path": path}, status=504)
+        return web.json_response({"error": f"目录扫描超时: {path}", "path": path}, status=504)
     except Exception as e:
         return web.json_response({"error": str(e), "path": path}, status=500)
