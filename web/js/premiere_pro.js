@@ -90,54 +90,107 @@ const STYLES = `
     letter-spacing: 1px; background: #232323; border-bottom: 1px solid #333;
 }
 .bsai-pp-timeline-scroll {
-    flex: 1; overflow-x: auto; overflow-y: hidden; padding: 12px 16px;
-    background: #1a1a1a;
+    flex: 1; overflow: auto; background: #1a1a1a; padding: 0;
 }
-.bsai-pp-timeline-track {
-    display: flex; align-items: flex-start; gap: 0; min-height: 120px;
+.bsai-pp-timeline-container { min-width: 100%; display: flex; flex-direction: column; }
+.bsai-pp-time-ruler {
+    display: flex; align-items: flex-end; height: 28px; background: #232323;
+    border-bottom: 1px solid #3a3a3a; position: sticky; top: 0; z-index: 5;
 }
+.bsai-pp-ruler-spacer {
+    min-width: 150px; flex-shrink: 0; border-right: 1px solid #3a3a3a;
+}
+.bsai-pp-ruler-marks { flex: 1; position: relative; height: 100%; padding-left: 4px; }
+.bsai-pp-ruler-mark {
+    position: absolute; bottom: 0; font-size: 10px; color: #666;
+    border-left: 1px solid #333; height: 8px; white-space: nowrap; padding-left: 3px;
+}
+.bsai-pp-track-section-label {
+    padding: 4px 10px; color: #666; font-size: 10px; text-transform: uppercase;
+    letter-spacing: 1px; background: #1e1e1e; border-bottom: 1px solid #2a2a2a;
+    display: flex; align-items: center; gap: 8px;
+}
+.bsai-pp-track-row {
+    display: flex; border-bottom: 1px solid #111; min-height: 64px;
+}
+.bsai-pp-track-header {
+    min-width: 150px; flex-shrink: 0; background: #2a2a2a;
+    border-right: 1px solid #3a3a3a; display: flex; flex-direction: column;
+    padding: 6px 8px; gap: 4px; justify-content: center;
+}
+.bsai-pp-track-header-row { display: flex; align-items: center; gap: 4px; }
+.bsai-pp-track-name { font-size: 12px; font-weight: 600; min-width: 28px; }
+.bsai-pp-track-name.video { color: #4a90d9; }
+.bsai-pp-track-name.audio { color: #4caf50; }
+.bsai-pp-track-controls { display: flex; gap: 3px; }
+.bsai-pp-track-btn {
+    width: 22px; height: 22px; border-radius: 3px; background: #1a1a1a;
+    border: 1px solid #444; color: #666; cursor: pointer; font-size: 10px;
+    display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+}
+.bsai-pp-track-btn:hover { background: #333; color: #ddd; }
+.bsai-pp-track-btn.active { background: #4a90d9; color: #fff; border-color: #5a9fe8; }
+.bsai-pp-track-btn.danger:hover { background: #d35454; color: #fff; }
+.bsai-pp-track-content {
+    flex: 1; background: #1a1a1a; display: flex; align-items: center;
+    gap: 0; padding: 4px 4px; overflow-x: visible; position: relative; min-height: 56px;
+}
+.bsai-pp-track-empty { color: #444; font-size: 11px; padding: 0 12px; }
 .bsai-pp-clip-block {
-    background: #2a2a2a; border: 2px solid #3a3a3a; border-radius: 6px;
-    width: 200px; min-width: 200px; cursor: pointer; overflow: hidden;
-    transition: border-color 0.2s, box-shadow 0.2s; position: relative;
+    border: 1px solid #3a3a3a; border-radius: 4px; height: 52px; cursor: pointer;
+    overflow: hidden; position: relative; transition: border-color 0.2s, box-shadow 0.2s;
+    margin: 0 1px; flex-shrink: 0; display: flex; flex-direction: column; min-width: 50px;
 }
-.bsai-pp-clip-block:hover { border-color: #555; }
-.bsai-pp-clip-block.selected {
-    border-color: #4a90d9; box-shadow: 0 0 8px rgba(74,144,217,0.4);
-}
+.bsai-pp-clip-block.video-clip { background: #2a3a4a; border-color: #3a5a7a; border-left: 3px solid #4a90d9; }
+.bsai-pp-clip-block.audio-clip { background: #2a3a2a; border-color: #3a6a3a; border-left: 3px solid #4caf50; }
+.bsai-pp-clip-block.linked { border-left-color: #ffa726; }
+.bsai-pp-clip-block:hover { border-color: #6a8aaa; }
+.bsai-pp-clip-block.selected { border-color: #4a90d9; box-shadow: 0 0 8px rgba(74,144,217,0.5); }
 .bsai-pp-clip-block.disabled { opacity: 0.4; }
 .bsai-pp-clip-thumb {
-    width: 100%; height: 90px; background: #111; display: flex;
-    align-items: center; justify-content: center; overflow: hidden;
-    position: relative;
+    flex: 1; background: #111; display: flex; align-items: center;
+    justify-content: center; overflow: hidden; position: relative; min-height: 30px;
 }
 .bsai-pp-clip-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.bsai-pp-clip-thumb .placeholder { color: #555; font-size: 24px; }
+.bsai-pp-clip-thumb .placeholder { color: #555; font-size: 14px; }
 .bsai-pp-clip-badge {
-    position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.7);
-    color: #aaa; font-size: 10px; padding: 2px 6px; border-radius: 3px;
+    position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,0.7);
+    color: #aaa; font-size: 8px; padding: 1px 4px; border-radius: 2px;
 }
 .bsai-pp-clip-badge.audio-replaced { color: #ffc107; }
-.bsai-pp-clip-info { padding: 6px 8px; }
+.bsai-pp-clip-info { padding: 2px 6px; }
 .bsai-pp-clip-name {
-    color: #ddd; font-size: 11px; white-space: nowrap; overflow: hidden;
-    text-overflow: ellipsis; margin-bottom: 2px;
+    color: #ddd; font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.bsai-pp-clip-duration { color: #888; font-size: 10px; }
 .bsai-pp-clip-num {
-    position: absolute; top: 4px; left: 4px; background: rgba(74,144,217,0.8);
-    color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 3px;
-    font-weight: 600;
+    position: absolute; top: 2px; left: 2px; background: rgba(74,144,217,0.8);
+    color: #fff; font-size: 8px; padding: 1px 4px; border-radius: 2px; font-weight: 600;
 }
 .bsai-pp-transition-arrow {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    min-width: 48px; height: 120px; cursor: pointer; color: #888; font-size: 10px;
-    border-radius: 6px; transition: background 0.2s, color 0.2s; position: relative;
-    user-select: none; gap: 4px; flex-shrink: 0;
+    min-width: 28px; height: 52px; cursor: pointer; color: #888; font-size: 8px;
+    border-radius: 4px; transition: background 0.2s, color 0.2s; position: relative;
+    user-select: none; gap: 2px; flex-shrink: 0;
 }
 .bsai-pp-transition-arrow:hover { background: #333; color: #ddd; }
-.bsai-pp-transition-arrow .arrow-icon { font-size: 18px; writing-mode: horizontal-tb; }
-.bsai-pp-transition-arrow .arrow-label { writing-mode: vertical-rl; text-orientation: mixed; }
+.bsai-pp-transition-arrow .arrow-icon { font-size: 12px; writing-mode: horizontal-tb; }
+.bsai-pp-transition-arrow .arrow-label { writing-mode: vertical-rl; text-orientation: mixed; font-size: 8px; }
+.bsai-pp-add-track-row {
+    display: flex; gap: 8px; padding: 6px 10px; background: #1e1e1e; border-bottom: 1px solid #2a2a2a;
+}
+.bsai-pp-add-track-btn {
+    background: #2a2a2a; border: 1px dashed #555; color: #888; cursor: pointer;
+    padding: 4px 12px; border-radius: 4px; font-size: 11px; transition: all 0.15s;
+    display: flex; align-items: center; gap: 4px;
+}
+.bsai-pp-add-track-btn:hover { background: #333; border-color: #4a90d9; color: #4a90d9; }
+.bsai-pp-link-badge {
+    display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px;
+    border-radius: 3px; font-size: 10px; cursor: pointer; transition: all 0.15s;
+}
+.bsai-pp-link-badge.linked { background: #3a3a1a; color: #ffa726; border: 1px solid #5a5a2a; }
+.bsai-pp-link-badge.unlinked { background: #1a1a1a; color: #666; border: 1px solid #333; }
+.bsai-pp-link-badge:hover { opacity: 0.8; }
 .bsai-pp-transition-popup {
     position: fixed; z-index: 100010; background: #2a2a2a; border: 1px solid #555;
     border-radius: 8px; padding: 8px; min-width: 160px;
@@ -294,6 +347,12 @@ class AutoImporter {
         if (!td.clips) td.clips = [];
         if (!td.known_files) td.known_files = [];
         if (td.filter_audio_only === undefined) td.filter_audio_only = true;
+        if (!td.video_tracks) td.video_tracks = [{ name: "V1", locked: false, visible: true }];
+        if (!td.audio_tracks) td.audio_tracks = [{ name: "A1", locked: false, muted: false, solo: false }];
+        if (td.clips.length > 0 && !td.clips[0].track_type) {
+            const editor = importerMap.get(this.node.id)?._editor;
+            if (editor) td.clips = editor._migrateClips(td.clips);
+        }
         const known = new Set(td.known_files);
         const newFiles = files.filter(f => !known.has(f.file_name));
         if (newFiles.length === 0) return;
@@ -308,28 +367,20 @@ class AutoImporter {
                     skipped++;
                     continue;
                 }
-                const clip = {
-                    id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-                    file_path: file.file_path,
-                    file_name: file.file_name,
-                    created_time: file.created_time,
-                    duration: meta.duration || 0,
-                    width: meta.width || 1920,
-                    height: meta.height || 1080,
-                    fps: meta.fps || 30,
+                const vId = `clip_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+                const aId = `clip_${Date.now() + 1}_${Math.random().toString(36).substr(2, 6)}`;
+                const base = {
+                    file_path: file.file_path, file_name: file.file_name,
+                    created_time: file.created_time, duration: meta.duration || 0,
+                    width: meta.width || 1920, height: meta.height || 1080, fps: meta.fps || 30,
                     has_audio: meta.has_audio || false,
-                    trim_start: 0,
-                    trim_end: meta.duration || 0,
-                    transition_in: "fade",
-                    transition_out: "fade",
-                    transition_duration: 0.5,
-                    audio_replacement: null,
-                    audio_fade_in: 0,
-                    audio_fade_out: 0,
-                    video_enabled: true,
-                    audio_enabled: true,
+                    trim_start: 0, trim_end: meta.duration || 0,
+                    transition_in: "fade", transition_out: "fade", transition_duration: 0.5,
+                    audio_replacement: null, audio_fade_in: 0, audio_fade_out: 0,
+                    video_enabled: true, audio_enabled: true,
                 };
-                td.clips.push(clip);
+                td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: aId, is_video_part: true });
+                td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: vId, is_video_part: false });
                 td.known_files.push(file.file_name);
             } catch (e) {
                 console.error("[BSAI PP] Failed to add file:", file.file_name, e);
@@ -343,8 +394,9 @@ class AutoImporter {
     setEditor(editor) { this._editor = editor; }
 
     updateNodeTitle(td) {
-        const count = td.clips.length;
-        const total = td.clips.reduce((s, c) => s + (c.trim_end - c.trim_start), 0);
+        const vClips = td.clips.filter(c => c.track_type === "video" || !c.track_type);
+        const count = vClips.length;
+        const total = vClips.reduce((s, c) => s + (c.trim_end - c.trim_start), 0);
         if (count > 0) {
             this.node.title = `🎬 Premiere Pro (${count} clips / ${formatTime(total)})`;
         } else {
@@ -369,9 +421,51 @@ class TimelineEditor {
     _load() {
         const w = this.node.widgets?.find(w => w.name === "timeline_data");
         if (w?.value) {
-            try { return JSON.parse(w.value); } catch { /* fall through */ }
+            try {
+                const td = JSON.parse(w.value);
+                if (!td.clips) td.clips = [];
+                if (!td.known_files) td.known_files = [];
+                if (td.filter_audio_only === undefined) td.filter_audio_only = true;
+                if (!td.video_tracks) td.video_tracks = [{ name: "V1", locked: false, visible: true }];
+                if (!td.audio_tracks) td.audio_tracks = [{ name: "A1", locked: false, muted: false, solo: false }];
+                if (td.clips.length > 0 && !td.clips[0].track_type) {
+                    td.clips = this._migrateClips(td.clips);
+                }
+                return td;
+            } catch { /* fall through */ }
         }
-        return { clips: [], known_files: [] };
+        return {
+            clips: [], known_files: [],
+            video_tracks: [{ name: "V1", locked: false, visible: true }],
+            audio_tracks: [{ name: "A1", locked: false, muted: false, solo: false }],
+        };
+    }
+
+    _migrateClips(oldClips) {
+        const newClips = [];
+        for (const old of oldClips) {
+            const vId = `clip_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+            const aId = `clip_${Date.now() + 1}_${Math.random().toString(36).substr(2, 6)}`;
+            const base = {
+                file_path: old.file_path, file_name: old.file_name,
+                created_time: old.created_time, duration: old.duration || 0,
+                width: old.width || 1920, height: old.height || 1080, fps: old.fps || 30,
+                has_audio: old.has_audio !== false,
+                trim_start: old.trim_start || 0, trim_end: old.trim_end || old.duration || 0,
+                transition_in: old.transition_in || "fade", transition_out: old.transition_out || "fade",
+                transition_duration: old.transition_duration ?? 0.5,
+                audio_replacement: old.audio_replacement || null,
+                audio_fade_in: old.audio_fade_in || 0, audio_fade_out: old.audio_fade_out || 0,
+                video_enabled: old.video_enabled !== false, audio_enabled: old.audio_enabled !== false,
+            };
+            newClips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: aId, is_video_part: true });
+            newClips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: vId, is_video_part: false });
+        }
+        return newClips;
+    }
+
+    _getClipsForTrack(trackType, trackIndex) {
+        return (this.td.clips || []).filter(c => c.track_type === trackType && c.track_index === trackIndex);
     }
 
     _save() {
@@ -438,15 +532,16 @@ class TimelineEditor {
                     <input type="checkbox" data-act="filter-audio" ${this.td.filter_audio_only !== false ? "checked" : ""}>
                     <button class="bsai-pp-btn" data-act="scan">🔍 扫描</button>
                     <button class="bsai-pp-btn" data-act="manual-import">📥 手动导入</button>
+                    <button class="bsai-pp-btn" data-act="add-vtrack">＋ 视频轨道</button>
+                    <button class="bsai-pp-btn" data-act="add-atrack">＋ 音频轨道</button>
                     <div class="bsai-pp-status">
                         <span><span class="dot ${this._getWidgetValue("auto_import", true) ? "on" : "off"}" data-dot></span> ${this._getWidgetValue("auto_import", true) ? "监控中" : "已停止"}</span>
                     </div>
                 </div>
                 <div class="bsai-pp-body">
                     <div class="bsai-pp-timeline-section">
-                        <div class="bsai-pp-section-label">时间轴轨道</div>
                         <div class="bsai-pp-timeline-scroll">
-                            <div class="bsai-pp-timeline-track" data-track></div>
+                            <div class="bsai-pp-timeline-container" data-track-container></div>
                         </div>
                     </div>
                     <div class="bsai-pp-edit-section">
@@ -482,6 +577,8 @@ class TimelineEditor {
         };
         this.modal.querySelector('[data-act="scan"]').onclick = () => this._scanNow();
         this.modal.querySelector('[data-act="manual-import"]').onclick = () => this._manualImport();
+        this.modal.querySelector('[data-act="add-vtrack"]').onclick = () => this._addVideoTrack();
+        this.modal.querySelector('[data-act="add-atrack"]').onclick = () => this._addAudioTrack();
         this.modal.querySelector('[data-act="render"]').onclick = () => this._renderVideo();
         this.modal.addEventListener("keydown", (e) => { if (e.key === "Escape") this.close(); });
     }
@@ -494,51 +591,184 @@ class TimelineEditor {
     }
 
     _renderTimeline() {
-        const track = this.modal.querySelector("[data-track]");
-        if (!track) return;
-        track.innerHTML = "";
+        const container = this.modal.querySelector("[data-track-container]");
+        if (!container) return;
+        container.innerHTML = "";
         const clips = this.td.clips || [];
-        if (clips.length === 0) {
-            track.innerHTML = `<div class="bsai-pp-empty-timeline">暂无视频片段<br><small>请运行工作流生成视频，或点击「手动导入」添加视频文件</small></div>`;
-            return;
+        const videoTracks = this.td.video_tracks || [{ name: "V1", locked: false, visible: true }];
+        const audioTracks = this.td.audio_tracks || [{ name: "A1", locked: false, muted: false, solo: false }];
+
+        let maxDuration = 0;
+        for (let i = 0; i < videoTracks.length; i++) {
+            const dur = this._getClipsForTrack("video", i).reduce((s, c) => s + (c.trim_end - c.trim_start), 0);
+            maxDuration = Math.max(maxDuration, dur);
         }
-        clips.forEach((clip, i) => {
-            if (i > 0) {
-                const arrow = document.createElement("div");
-                arrow.className = "bsai-pp-transition-arrow";
-                const transIn = clip.transition_in || "fade";
-                arrow.innerHTML = `
-                    <span class="arrow-icon">${TRANSITION_ICONS[transIn] || "🌫️"}</span>
-                    <span class="arrow-label">${TRANSITION_LABELS[transIn] || "淡入淡出"}</span>`;
-                arrow.title = `点击切换过渡效果 (当前: ${TRANSITION_LABELS[transIn] || "淡入淡出"})`;
-                arrow.onclick = (e) => { e.stopPropagation(); this._showTransitionPopup(arrow, i); };
-                track.appendChild(arrow);
-            }
-            track.appendChild(this._createClipBlock(clip, i));
-        });
+        for (let i = 0; i < audioTracks.length; i++) {
+            const dur = this._getClipsForTrack("audio", i).reduce((s, c) => s + (c.trim_end - c.trim_start), 0);
+            maxDuration = Math.max(maxDuration, dur);
+        }
+
+        const ruler = document.createElement("div");
+        ruler.className = "bsai-pp-time-ruler";
+        ruler.innerHTML = `<div class="bsai-pp-ruler-spacer"></div><div class="bsai-pp-ruler-marks">${this._renderRulerMarks(maxDuration)}</div>`;
+        container.appendChild(ruler);
+
+        const vLabel = document.createElement("div");
+        vLabel.className = "bsai-pp-track-section-label";
+        vLabel.innerHTML = `<span>📹 视频轨道</span>`;
+        container.appendChild(vLabel);
+        for (let i = videoTracks.length - 1; i >= 0; i--) {
+            container.appendChild(this._createTrackRow("video", i, videoTracks[i]));
+        }
+
+        const aLabel = document.createElement("div");
+        aLabel.className = "bsai-pp-track-section-label";
+        aLabel.innerHTML = `<span>🎵 音频轨道</span>`;
+        container.appendChild(aLabel);
+        for (let i = 0; i < audioTracks.length; i++) {
+            container.appendChild(this._createTrackRow("audio", i, audioTracks[i]));
+        }
+
+        if (clips.length === 0) {
+            const empty = document.createElement("div");
+            empty.style.cssText = "color:#555;font-size:13px;padding:40px;text-align:center;";
+            empty.textContent = "暂无视频片段，请运行工作流生成视频或手动导入";
+            container.appendChild(empty);
+        }
     }
 
-    _createClipBlock(clip, index) {
+    _renderRulerMarks(totalDuration) {
+        if (totalDuration <= 0) totalDuration = 30;
+        const interval = totalDuration > 120 ? 30 : totalDuration > 60 ? 15 : totalDuration > 30 ? 10 : 5;
+        const span = totalDuration + interval;
+        let html = "";
+        for (let t = 0; t <= span; t += interval) {
+            const pct = (t / span) * 100;
+            html += `<span class="bsai-pp-ruler-mark" style="left:${pct}%">${formatTime(t)}</span>`;
+        }
+        return html;
+    }
+
+    _createTrackRow(trackType, trackIndex, trackInfo) {
+        const row = document.createElement("div");
+        row.className = "bsai-pp-track-row";
+        const isVideo = trackType === "video";
+        const trackName = trackInfo.name || (isVideo ? `V${trackIndex + 1}` : `A${trackIndex + 1}`);
+
+        const header = document.createElement("div");
+        header.className = "bsai-pp-track-header";
+        let controls;
+        if (isVideo) {
+            controls = `
+                <div class="bsai-pp-track-controls">
+                    <button class="bsai-pp-track-btn ${trackInfo.visible !== false ? "active" : ""}" data-track-act="visible" title="显示/隐藏">👁</button>
+                    <button class="bsai-pp-track-btn ${trackInfo.locked ? "active" : ""}" data-track-act="lock" title="锁定">${trackInfo.locked ? "🔒" : "🔓"}</button>
+                    <button class="bsai-pp-track-btn danger" data-track-act="remove" title="删除轨道">✕</button>
+                </div>`;
+        } else {
+            controls = `
+                <div class="bsai-pp-track-controls">
+                    <button class="bsai-pp-track-btn ${trackInfo.muted ? "active" : ""}" data-track-act="mute" title="静音">🔇</button>
+                    <button class="bsai-pp-track-btn ${trackInfo.solo ? "active" : ""}" data-track-act="solo" title="独奏">🎧</button>
+                    <button class="bsai-pp-track-btn ${trackInfo.locked ? "active" : ""}" data-track-act="lock" title="锁定">${trackInfo.locked ? "🔒" : "🔓"}</button>
+                    <button class="bsai-pp-track-btn danger" data-track-act="remove" title="删除轨道">✕</button>
+                </div>`;
+        }
+        header.innerHTML = `<div class="bsai-pp-track-header-row"><span class="bsai-pp-track-name ${isVideo ? "video" : "audio"}">${trackName}</span></div>${controls}`;
+        header.querySelectorAll("[data-track-act]").forEach(btn => {
+            btn.onclick = (e) => { e.stopPropagation(); this._handleTrackAction(trackType, trackIndex, btn.getAttribute("data-track-act")); };
+        });
+        row.appendChild(header);
+
+        const content = document.createElement("div");
+        content.className = "bsai-pp-track-content";
+        const trackClips = this._getClipsForTrack(trackType, trackIndex);
+        if (trackClips.length === 0) {
+            content.innerHTML = `<span class="bsai-pp-track-empty">空轨道</span>`;
+        } else {
+            trackClips.forEach((clip, i) => {
+                if (i > 0 && isVideo) {
+                    const arrow = document.createElement("div");
+                    arrow.className = "bsai-pp-transition-arrow";
+                    const transIn = clip.transition_in || "fade";
+                    arrow.innerHTML = `<span class="arrow-icon">${TRANSITION_ICONS[transIn] || "🌫️"}</span><span class="arrow-label">${TRANSITION_LABELS[transIn] || "淡入淡出"}</span>`;
+                    arrow.title = `点击切换过渡效果 (当前: ${TRANSITION_LABELS[transIn] || "淡入淡出"})`;
+                    const clipIdx = this.td.clips.indexOf(clip);
+                    arrow.onclick = (e) => { e.stopPropagation(); this._showTransitionPopup(arrow, clipIdx); };
+                    content.appendChild(arrow);
+                }
+                const clipIdx = this.td.clips.indexOf(clip);
+                content.appendChild(this._createClipBlock(clip, clipIdx));
+            });
+        }
+        row.appendChild(content);
+        return row;
+    }
+
+    _handleTrackAction(trackType, trackIndex, action) {
+        const tracks = trackType === "video" ? this.td.video_tracks : this.td.audio_tracks;
+        const track = tracks[trackIndex];
+        if (!track) return;
+        if (action === "lock") {
+            track.locked = !track.locked;
+        } else if (action === "visible" && trackType === "video") {
+            track.visible = track.visible === false;
+        } else if (action === "mute" && trackType === "audio") {
+            track.muted = !track.muted;
+        } else if (action === "solo" && trackType === "audio") {
+            track.solo = !track.solo;
+        } else if (action === "remove") {
+            if (this._getClipsForTrack(trackType, trackIndex).length > 0) { this._toast("轨道上有片段，无法删除", "error"); return; }
+            if (tracks.length <= 1) { this._toast("至少保留一个轨道", "info"); return; }
+            tracks.splice(trackIndex, 1);
+            this._toast(`已删除轨道 ${track.name}`, "success");
+        }
+        this._save();
+        this._renderTimeline();
+    }
+
+    _addVideoTrack() {
+        if (!this.td.video_tracks) this.td.video_tracks = [{ name: "V1", locked: false, visible: true }];
+        const idx = this.td.video_tracks.length;
+        this.td.video_tracks.push({ name: `V${idx + 1}`, locked: false, visible: true });
+        this._save();
+        this._renderTimeline();
+        this._toast(`已添加视频轨道 V${idx + 1}`, "success");
+    }
+
+    _addAudioTrack() {
+        if (!this.td.audio_tracks) this.td.audio_tracks = [{ name: "A1", locked: false, muted: false, solo: false }];
+        const idx = this.td.audio_tracks.length;
+        this.td.audio_tracks.push({ name: `A${idx + 1}`, locked: false, muted: false, solo: false });
+        this._save();
+        this._renderTimeline();
+        this._toast(`已添加音频轨道 A${idx + 1}`, "success");
+    }
+
+    _createClipBlock(clip, clipIndex) {
         const block = document.createElement("div");
         block.className = "bsai-pp-clip-block";
-        if (index === this.selectedIndex) block.classList.add("selected");
+        const isVideo = clip.track_type === "video";
+        block.classList.add(isVideo ? "video-clip" : "audio-clip");
+        if (clip.linked_id) block.classList.add("linked");
+        if (clipIndex === this.selectedIndex) block.classList.add("selected");
         if (!clip.video_enabled && !clip.audio_enabled) block.classList.add("disabled");
-        const trimDur = (clip.trim_end || 0) - (clip.trim_start || 0);
         let badges = "";
-        if (clip.audio_replacement) badges += `<span class="bsai-pp-clip-badge audio-replaced">🎵替换</span>`;
-        else if (!clip.audio_enabled) badges += `<span class="bsai-pp-clip-badge">🔇静音</span>`;
-        else if (!clip.has_audio) badges += `<span class="bsai-pp-clip-badge">无声</span>`;
+        if (!isVideo) {
+            if (clip.audio_replacement) badges += `<span class="bsai-pp-clip-badge audio-replaced">🎵</span>`;
+            else if (!clip.audio_enabled) badges += `<span class="bsai-pp-clip-badge">🔇</span>`;
+        }
+        const icon = isVideo ? "🎬" : "🎵";
+        const thumbAttr = isVideo ? `data-thumb="${escapeHtml(clip.file_path)}"` : "";
         block.innerHTML = `
-            <div class="bsai-pp-clip-thumb" data-thumb="${escapeHtml(clip.file_path)}">
-                <span class="placeholder">🎬</span>
+            <div class="bsai-pp-clip-thumb" ${thumbAttr}>
+                <span class="placeholder">${icon}</span>
                 ${badges}
             </div>
             <div class="bsai-pp-clip-info">
                 <div class="bsai-pp-clip-name" title="${escapeHtml(clip.file_name)}">${escapeHtml(clip.file_name)}</div>
-                <div class="bsai-pp-clip-duration">时长: ${formatTime(trimDur)} / ${formatTime(clip.duration)}</div>
-            </div>
-            <span class="bsai-pp-clip-num">${index + 1}</span>`;
-        block.onclick = () => { this.selectedIndex = index; this._renderAll(); };
+            </div>`;
+        block.onclick = () => { this.selectedIndex = clipIndex; this._renderAll(); };
         return block;
     }
 
@@ -573,9 +803,17 @@ class TimelineEditor {
                 e.stopPropagation();
                 const newTrans = opt.getAttribute("data-trans");
                 clip.transition_in = newTrans;
-                if (clipIndex > 0) {
-                    const prevClip = this.td.clips[clipIndex - 1];
-                    if (prevClip) prevClip.transition_out = newTrans;
+                const trackClips = this._getClipsForTrack(clip.track_type, clip.track_index);
+                const trackIdx = trackClips.indexOf(clip);
+                if (trackIdx > 0) trackClips[trackIdx - 1].transition_out = newTrans;
+                if (clip.linked_id) {
+                    const linked = this.td.clips.find(c => c.id === clip.linked_id);
+                    if (linked) {
+                        linked.transition_in = newTrans;
+                        const lTrackClips = this._getClipsForTrack(linked.track_type, linked.track_index);
+                        const lIdx = lTrackClips.indexOf(linked);
+                        if (lIdx > 0) lTrackClips[lIdx - 1].transition_out = newTrans;
+                    }
                 }
                 this._save();
                 this._renderTimeline();
@@ -621,10 +859,11 @@ class TimelineEditor {
         const panel = this.modal.querySelector("[data-edit]");
         if (!panel) return;
         if (this.selectedIndex < 0 || this.selectedIndex >= (this.td.clips || []).length) {
-            panel.innerHTML = `<div class="bsai-pp-no-selection">点击上方时间轴中的视频片段进行编辑</div>`;
+            panel.innerHTML = `<div class="bsai-pp-no-selection">点击时间轴中的片段进行编辑</div>`;
             return;
         }
         const clip = this.td.clips[this.selectedIndex];
+        const isVideo = clip.track_type === "video";
         const dur = clip.duration || 0;
         const trimStart = clip.trim_start || 0;
         const trimEnd = clip.trim_end || dur;
@@ -634,38 +873,59 @@ class TimelineEditor {
         const audioRep = clip.audio_replacement || "";
         const aFadeIn = clip.audio_fade_in || 0;
         const aFadeOut = clip.audio_fade_out || 0;
-        panel.innerHTML = `
+        const isLinked = !!clip.linked_id;
+        const trackName = isVideo
+            ? (this.td.video_tracks?.[clip.track_index]?.name || `V${clip.track_index + 1}`)
+            : (this.td.audio_tracks?.[clip.track_index]?.name || `A${clip.track_index + 1}`);
+        const trackOptions = isVideo
+            ? (this.td.video_tracks || []).map((t, i) => `<option value="${i}" ${i === clip.track_index ? "selected" : ""}>${t.name || `V${i+1}`}</option>`).join("")
+            : (this.td.audio_tracks || []).map((t, i) => `<option value="${i}" ${i === clip.track_index ? "selected" : ""}>${t.name || `A${i+1}`}</option>`).join("");
+
+        let html = `
             <div class="bsai-pp-edit-row">
                 <label>文件名</label>
                 <input type="text" value="${escapeHtml(clip.file_name)}" readonly style="opacity:0.6">
+                <span class="bsai-pp-link-badge ${isLinked ? "linked" : "unlinked"}" data-act="toggle-link" title="点击${isLinked ? "解除" : "建立"}音视频链接">
+                    ${isLinked ? "🔗 已链接" : "🔓 未链接"}
+                </span>
+            </div>
+            <div class="bsai-pp-edit-row">
+                <label>轨道</label>
+                <span style="color:${isVideo ? "#4a90d9" : "#4caf50"};font-size:12px;font-weight:600;">${isVideo ? "📹" : "🎵"} ${trackName}</span>
+                <label>移动到</label>
+                <select data-field="track_index">${trackOptions}</select>
             </div>
             <div class="bsai-pp-edit-row">
                 <label>裁剪起点</label>
-                <input type="range" min="0" max="${dur}" step="0.1" value="${trimStart}" data-field="trim_start">
-                <input type="number" min="0" max="${dur}" step="0.1" value="${trimStart}" data-field="trim_start">
+                <input type="range" min="0" max="${dur}" step="0.1" value="${trimStart}" data-field="trim_start" data-sync="1">
+                <input type="number" min="0" max="${dur}" step="0.1" value="${trimStart}" data-field="trim_start" data-sync="1">
                 <label>裁剪终点</label>
-                <input type="range" min="0" max="${dur}" step="0.1" value="${trimEnd}" data-field="trim_end">
-                <input type="number" min="0" max="${dur}" step="0.1" value="${trimEnd}" data-field="trim_end">
-            </div>
+                <input type="range" min="0" max="${dur}" step="0.1" value="${trimEnd}" data-field="trim_end" data-sync="1">
+                <input type="number" min="0" max="${dur}" step="0.1" value="${trimEnd}" data-field="trim_end" data-sync="1">
+            </div>`;
+        if (isVideo) {
+            html += `
             <div class="bsai-pp-edit-row">
                 <label>入场过渡</label>
-                <select data-field="transition_in">
+                <select data-field="transition_in" data-sync="1">
                     ${TRANSITIONS.map(t => `<option value="${t}" ${t === transIn ? "selected" : ""}>${TRANSITION_LABELS[t]}</option>`).join("")}
                 </select>
                 <label>出场过渡</label>
-                <select data-field="transition_out">
+                <select data-field="transition_out" data-sync="1">
                     ${TRANSITIONS.map(t => `<option value="${t}" ${t === transOut ? "selected" : ""}>${TRANSITION_LABELS[t]}</option>`).join("")}
                 </select>
                 <label>过渡时长</label>
-                <input type="number" min="0" max="5" step="0.1" value="${transDur}" data-field="transition_duration">
+                <input type="number" min="0" max="5" step="0.1" value="${transDur}" data-field="transition_duration" data-sync="1">
             </div>
             <div class="bsai-pp-edit-row">
-                <label>视频轨道</label>
+                <label>视频启用</label>
                 <input type="checkbox" data-field="video_enabled" ${clip.video_enabled !== false ? "checked" : ""}>
-                <label>音频轨道</label>
-                <input type="checkbox" data-field="audio_enabled" ${clip.audio_enabled !== false ? "checked" : ""}>
-            </div>
+            </div>`;
+        } else {
+            html += `
             <div class="bsai-pp-edit-row">
+                <label>音频启用</label>
+                <input type="checkbox" data-field="audio_enabled" ${clip.audio_enabled !== false ? "checked" : ""}>
                 <label>音频淡入</label>
                 <input type="number" min="0" max="10" step="0.1" value="${aFadeIn}" data-field="audio_fade_in">
                 <label>音频淡出</label>
@@ -676,43 +936,40 @@ class TimelineEditor {
                 <input type="text" value="${escapeHtml(audioRep)}" placeholder="留空使用原音频" data-field="audio_replacement">
                 <button class="bsai-pp-btn" data-act="browse-audio">浏览...</button>
                 <button class="bsai-pp-btn" data-act="clear-audio">清除</button>
-            </div>
+            </div>`;
+        }
+        html += `
             <div class="bsai-pp-clip-actions">
                 <button class="bsai-pp-btn" data-act="move-left">◀ 左移</button>
                 <button class="bsai-pp-btn" data-act="move-right">右移 ▶</button>
-                <button class="bsai-pp-btn" data-act="replace-video">替换视频文件</button>
+                ${isVideo ? '<button class="bsai-pp-btn" data-act="replace-video">替换视频文件</button>' : ""}
                 <button class="bsai-pp-btn bsai-pp-btn-danger" data-act="delete">🗑 删除片段</button>
             </div>`;
+        panel.innerHTML = html;
         this._attachEditEvents(clip);
     }
 
     _attachEditEvents(clip) {
         const panel = this.modal.querySelector("[data-edit]");
+        const linked = clip.linked_id ? this.td.clips.find(c => c.id === clip.linked_id) : null;
 
         panel.querySelectorAll("[data-field]").forEach(input => {
             const field = input.getAttribute("data-field");
+            const shouldSync = input.hasAttribute("data-sync") && linked;
             const handler = () => {
                 let val;
                 if (input.type === "checkbox") val = input.checked;
                 else if (input.type === "number" || input.type === "range") val = parseFloat(input.value) || 0;
+                else if (field === "track_index") val = parseInt(input.value) || 0;
                 else val = input.value;
-                if (field === "trim_start") {
-                    val = Math.min(val, clip.trim_end - 0.1);
-                    val = Math.max(0, val);
-                }
-                if (field === "trim_end") {
-                    val = Math.max(val, clip.trim_start + 0.1);
-                    val = Math.min(clip.duration || val, val);
-                }
+                if (field === "trim_start") { val = Math.min(val, clip.trim_end - 0.1); val = Math.max(0, val); }
+                if (field === "trim_end") { val = Math.max(val, clip.trim_start + 0.1); val = Math.min(clip.duration || val, val); }
                 clip[field] = val;
-                if (input.type === "range") {
-                    const numInput = panel.querySelector(`input[type="number"][data-field="${field}"]`);
-                    if (numInput) numInput.value = val;
+                if (shouldSync && ["trim_start","trim_end","transition_in","transition_out","transition_duration"].includes(field)) {
+                    linked[field] = val;
                 }
-                if (input.type === "number") {
-                    const rangeInput = panel.querySelector(`input[type="range"][data-field="${field}"]`);
-                    if (rangeInput) rangeInput.value = val;
-                }
+                if (input.type === "range") { const n = panel.querySelector(`input[type="number"][data-field="${field}"]`); if (n) n.value = val; }
+                if (input.type === "number") { const r = panel.querySelector(`input[type="range"][data-field="${field}"]`); if (r) r.value = val; }
                 this._save();
                 this._renderTimeline();
                 this._renderFooter();
@@ -721,12 +978,18 @@ class TimelineEditor {
             if (input.type === "range") input.oninput = handler;
         });
 
+        const linkBadge = panel.querySelector('[data-act="toggle-link"]');
+        if (linkBadge) linkBadge.onclick = () => this._toggleLink(clip);
+
         panel.querySelector('[data-act="move-left"]').onclick = () => this._moveClip(this.selectedIndex, -1);
         panel.querySelector('[data-act="move-right"]').onclick = () => this._moveClip(this.selectedIndex, 1);
         panel.querySelector('[data-act="delete"]').onclick = () => this._deleteClip(this.selectedIndex);
-        panel.querySelector('[data-act="replace-video"]').onclick = () => this._replaceVideo(this.selectedIndex);
-        panel.querySelector('[data-act="browse-audio"]').onclick = () => this._browseAudio(clip);
-        panel.querySelector('[data-act="clear-audio"]').onclick = () => {
+        const replaceBtn = panel.querySelector('[data-act="replace-video"]');
+        if (replaceBtn) replaceBtn.onclick = () => this._replaceVideo(this.selectedIndex);
+        const browseBtn = panel.querySelector('[data-act="browse-audio"]');
+        if (browseBtn) browseBtn.onclick = () => this._browseAudio(clip);
+        const clearBtn = panel.querySelector('[data-act="clear-audio"]');
+        if (clearBtn) clearBtn.onclick = () => {
             clip.audio_replacement = null;
             const inp = panel.querySelector('[data-field="audio_replacement"]');
             if (inp) inp.value = "";
@@ -735,13 +998,36 @@ class TimelineEditor {
         };
     }
 
+    _toggleLink(clip) {
+        if (clip.linked_id) {
+            const linked = this.td.clips.find(c => c.id === clip.linked_id);
+            if (linked) linked.linked_id = null;
+            clip.linked_id = null;
+            this._toast("已解除音视频链接", "info");
+        } else {
+            const partner = this.td.clips.find(c => c.file_path === clip.file_path && c.id !== clip.id && !c.linked_id && c.track_type !== clip.track_type);
+            if (partner) {
+                clip.linked_id = partner.id;
+                partner.linked_id = clip.id;
+                this._toast("已建立音视频链接", "success");
+            } else {
+                this._toast("没有可链接的对应片段", "info");
+                return;
+            }
+        }
+        this._save();
+        this._renderAll();
+    }
+
     _renderFooter() {
         const info = this.modal.querySelector("[data-footer-info]");
         if (!info) return;
         const clips = this.td.clips || [];
-        const enabled = clips.filter(c => c.video_enabled !== false || c.audio_enabled !== false);
-        const total = enabled.reduce((s, c) => s + (c.trim_end - c.trim_start), 0);
-        info.textContent = `共 ${clips.length} 个片段 (启用 ${enabled.length}) | 总时长: ${formatTime(total)}`;
+        const vClips = clips.filter(c => c.track_type === "video");
+        const aClips = clips.filter(c => c.track_type === "audio");
+        const vTotal = vClips.filter(c => c.video_enabled !== false).reduce((s, c) => s + (c.trim_end - c.trim_start), 0);
+        const aTotal = aClips.filter(c => c.audio_enabled !== false).reduce((s, c) => s + (c.trim_end - c.trim_start), 0);
+        info.textContent = `📹 ${vClips.length}个视频片段 (${formatTime(vTotal)}) | 🎵 ${aClips.length}个音频片段 (${formatTime(aTotal)}) | ${this.td.video_tracks?.length || 1}视频轨道 ${this.td.audio_tracks?.length || 1}音频轨道`;
     }
 
     _onClick(e) {
@@ -792,28 +1078,22 @@ class TimelineEditor {
                 this.td.known_files.push(file.file_name);
                 return false;
             }
-            const clip = {
-                id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-                file_path: file.file_path,
-                file_name: file.file_name,
+            const vId = `clip_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+            const aId = `clip_${Date.now() + 1}_${Math.random().toString(36).substr(2, 6)}`;
+            const base = {
+                file_path: file.file_path, file_name: file.file_name,
                 created_time: file.created_time || Date.now() / 1000,
                 duration: meta.duration || 0,
-                width: meta.width || 1920,
-                height: meta.height || 1080,
-                fps: meta.fps || 30,
+                width: meta.width || 1920, height: meta.height || 1080, fps: meta.fps || 30,
                 has_audio: meta.has_audio || false,
-                trim_start: 0,
-                trim_end: meta.duration || 0,
-                transition_in: "fade",
-                transition_out: "fade",
+                trim_start: 0, trim_end: meta.duration || 0,
+                transition_in: "fade", transition_out: "fade",
                 transition_duration: parseFloat(this._getWidgetValue("transition_duration", 0.5)),
-                audio_replacement: null,
-                audio_fade_in: 0,
-                audio_fade_out: 0,
-                video_enabled: true,
-                audio_enabled: true,
+                audio_replacement: null, audio_fade_in: 0, audio_fade_out: 0,
+                video_enabled: true, audio_enabled: true,
             };
-            this.td.clips.push(clip);
+            this.td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: aId, is_video_part: true });
+            this.td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: vId, is_video_part: false });
             if (!this.td.known_files) this.td.known_files = [];
             this.td.known_files.push(file.file_name);
             return true;
@@ -896,16 +1176,42 @@ class TimelineEditor {
     }
 
     _moveClip(index, dir) {
-        const newIndex = index + dir;
-        if (newIndex < 0 || newIndex >= this.td.clips.length) return;
-        const clips = this.td.clips;
-        [clips[index], clips[newIndex]] = [clips[newIndex], clips[index]];
-        this.selectedIndex = newIndex;
+        const clip = this.td.clips[index];
+        if (!clip) return;
+        const trackClips = this._getClipsForTrack(clip.track_type, clip.track_index);
+        const trackPos = trackClips.indexOf(clip);
+        const newTrackPos = trackPos + dir;
+        if (newTrackPos < 0 || newTrackPos >= trackClips.length) return;
+        const clip2 = trackClips[newTrackPos];
+        const idx1 = this.td.clips.indexOf(clip);
+        const idx2 = this.td.clips.indexOf(clip2);
+        [this.td.clips[idx1], this.td.clips[idx2]] = [this.td.clips[idx2], this.td.clips[idx1]];
+        if (clip.linked_id) {
+            const linked = this.td.clips.find(c => c.id === clip.linked_id);
+            if (linked) {
+                const lTrackClips = this._getClipsForTrack(linked.track_type, linked.track_index);
+                const lPos = lTrackClips.indexOf(linked);
+                const lNewPos = lPos + dir;
+                if (lNewPos >= 0 && lNewPos < lTrackClips.length) {
+                    const lClip2 = lTrackClips[lNewPos];
+                    const lIdx1 = this.td.clips.indexOf(linked);
+                    const lIdx2 = this.td.clips.indexOf(lClip2);
+                    [this.td.clips[lIdx1], this.td.clips[lIdx2]] = [this.td.clips[lIdx2], this.td.clips[lIdx1]];
+                }
+            }
+        }
+        this.selectedIndex = this.td.clips.indexOf(clip);
         this._save();
         this._renderAll();
     }
 
     _deleteClip(index) {
+        const clip = this.td.clips[index];
+        if (!clip) return;
+        if (clip.linked_id) {
+            const linked = this.td.clips.find(c => c.id === clip.linked_id);
+            if (linked) linked.linked_id = null;
+        }
         this.td.clips.splice(index, 1);
         if (this.selectedIndex >= this.td.clips.length) this.selectedIndex = this.td.clips.length - 1;
         this._save();
@@ -958,6 +1264,17 @@ class TimelineEditor {
                         clip.has_audio = meta.has_audio || false;
                         clip.trim_start = 0;
                         clip.trim_end = meta.duration || 0;
+                        if (clip.linked_id) {
+                            const linked = this.td.clips.find(c => c.id === clip.linked_id);
+                            if (linked) {
+                                linked.file_path = filePath;
+                                linked.file_name = fileName;
+                                linked.duration = meta.duration || 0;
+                                linked.has_audio = meta.has_audio || false;
+                                linked.trim_start = 0;
+                                linked.trim_end = meta.duration || 0;
+                            }
+                        }
                         this.thumbCache.delete(filePath);
                         this._save();
                         this._renderAll();

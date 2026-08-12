@@ -334,6 +334,81 @@ def _build_clip_command(clip, output_file, target_w, target_h, target_fps,
     input_path = clip["file_path"]
     if not os.path.exists(input_path):
         return None
+
+    track_type = clip.get("track_type")
+
+    # --- Video-only clip (multi-track mode) ---
+    if track_type == "video":
+        if trim_start > 0:
+            cmd.extend(["-ss", str(trim_start)])
+        cmd.extend(["-i", input_path])
+        cmd.extend(["-t", str(clip_duration)])
+
+        vf_filters = _build_vf_filters(
+            clip, clip_duration, clip_index, total_clips,
+            default_transition, transition_duration, target_w, target_h, target_fps
+        )
+        cmd.extend(["-vf", ",".join(vf_filters)])
+        cmd.extend(["-map", "0:v:0", "-an"])
+        cmd.extend([
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+            "-r", str(target_fps),
+            "-pix_fmt", "yuv420p",
+            output_file
+        ])
+        return cmd
+
+    # --- Audio-only clip (multi-track mode) ---
+    if track_type == "audio":
+        if trim_start > 0:
+            cmd.extend(["-ss", str(trim_start)])
+        cmd.extend(["-i", input_path])
+
+        audio_replacement = clip.get("audio_replacement")
+        has_audio = clip.get("has_audio", True)
+        audio_enabled = clip.get("audio_enabled", True)
+
+        next_input = 1
+        audio_input_idx = None
+        if audio_replacement and os.path.exists(audio_replacement):
+            cmd.extend(["-i", audio_replacement])
+            audio_input_idx = next_input
+            next_input += 1
+        elif not has_audio or not audio_enabled:
+            cmd.extend(["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"])
+            audio_input_idx = next_input
+            next_input += 1
+
+        # Dummy black video stream for concat compatibility
+        black_input_idx = next_input
+        cmd.extend(["-f", "lavfi", "-i", f"color=black:s={target_w}x{target_h}:r={target_fps}:d={clip_duration}"])
+
+        cmd.extend(["-t", str(clip_duration)])
+
+        af_filters = _build_af_filters(
+            clip, clip_duration, clip_index, total_clips,
+            default_transition, transition_duration
+        )
+        if af_filters and (audio_input_idx is not None or (has_audio and audio_enabled)):
+            cmd.extend(["-af", ",".join(af_filters)])
+
+        if audio_input_idx is not None:
+            cmd.extend(["-map", f"{black_input_idx}:v:0", "-map", f"{audio_input_idx}:a:0"])
+        else:
+            cmd.extend(["-map", f"{black_input_idx}:v:0", "-map", "0:a:0"])
+
+        cmd.extend([
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+            "-c:a", "aac", "-b:a", "192k",
+            "-r", str(target_fps),
+            "-pix_fmt", "yuv420p",
+            "-ar", "48000", "-ac", "2",
+            "-shortest",
+            output_file
+        ])
+        return cmd
+
+    # --- Legacy clip (no track_type: both video and audio) ---
     if trim_start > 0:
         cmd.extend(["-ss", str(trim_start)])
     cmd.extend(["-i", input_path])
@@ -382,15 +457,198 @@ def _build_clip_command(clip, output_file, target_w, target_h, target_fps,
     return cmd
 
 
+def _process_track_clips(clips, track_type, track_index, temp_dir, target_w, target_h, target_fps,
+                         default_transition, transition_duration):
+    """Process all clips in a single track and concatenate them.
+
+    Returns the path to the merged track file, or None on failure.
+    Uses track-local clip indices for fade/transition logic.
+    """
+    ffmpeg = get_ffmpeg()
+    if not ffmpeg or not clips:
+        return None
+
+    # Filter clips whose source file exists
+    valid_clips = [c for c in clips if os.path.exists(c.get("file_path", ""))]
+    if not valid_clips:
+        return None
+
+    track_temp_dir = os.path.join(temp_dir, f"track_{track_type}_{track_index}")
+    os.makedirs(track_temp_dir, exist_ok=True)
+
+    processed_files = []
+    total_clips = len(valid_clips)
+    for i, clip in enumerate(valid_clips):
+        output_file = os.path.join(track_temp_dir, f"clip_{i:04d}.mp4")
+        cmd = _build_clip_command(
+            clip, output_file, target_w, target_h, target_fps,
+            default_transition, transition_duration, i, total_clips
+        )
+        if not cmd:
+            print(f"[BSAI Premiere Pro] Skipping clip {i} in {track_type} track {track_index}: file not found or invalid")
+            continue
+        print(f"[BSAI Premiere Pro] Processing {track_type} track {track_index} clip {i+1}/{total_clips}: {clip.get('file_name', 'unknown')}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            print(f"[BSAI Premiere Pro] Failed to process clip {i} in {track_type} track {track_index}:\n{result.stderr}")
+            continue
+        processed_files.append(output_file)
+
+    if not processed_files:
+        return None
+
+    if len(processed_files) == 1:
+        return processed_files[0]
+
+    # Concatenate clips within the track
+    concat_file = os.path.join(track_temp_dir, "concat_list.txt")
+    with open(concat_file, "w", encoding="utf-8") as f:
+        for pf in processed_files:
+            escaped = pf.replace("\\", "/").replace(":", "\\:")
+            f.write(f"file '{escaped}'\n")
+
+    merged_file = os.path.join(temp_dir, f"merged_{track_type}_{track_index}.mp4")
+
+    # Try stream copy first (fast), fall back to re-encode if it fails
+    concat_cmd = [
+        ffmpeg, "-y", "-loglevel", "error",
+        "-f", "concat", "-safe", "0", "-i", concat_file,
+        "-c", "copy",
+        merged_file
+    ]
+    result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=600)
+    if result.returncode != 0:
+        print(f"[BSAI Premiere Pro] Stream copy concat failed for {track_type} track {track_index}, re-encoding...")
+        concat_cmd = [
+            ffmpeg, "-y", "-loglevel", "error",
+            "-f", "concat", "-safe", "0", "-i", concat_file,
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+            "-c:a", "aac", "-b:a", "192k",
+            "-pix_fmt", "yuv420p",
+            "-ar", "48000", "-ac", "2",
+            merged_file
+        ]
+        result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            print(f"[BSAI Premiere Pro] Failed to merge {track_type} track {track_index}:\n{result.stderr}")
+            return None
+
+    return merged_file
+
+
+def _overlay_video_tracks(track_files, temp_dir, target_w, target_h, target_fps):
+    """Overlay multiple video tracks. V1 is base, V2+ are overlaid on top.
+
+    Returns the path to the overlaid video file, or None on failure.
+    """
+    ffmpeg = get_ffmpeg()
+    if not ffmpeg or not track_files:
+        return None
+
+    if len(track_files) == 1:
+        return track_files[0]
+
+    output_file = os.path.join(temp_dir, "overlaid_video.mp4")
+    cmd = [ffmpeg, "-y", "-loglevel", "error"]
+    for tf in track_files:
+        cmd.extend(["-i", tf])
+
+    # Build overlay filter chain: [0:v][1:v]overlay=0:0[v1];[v1][2:v]overlay=0:0[vout]; ...
+    filter_parts = []
+    prev_label = "0:v"
+    for i in range(1, len(track_files)):
+        out_label = f"v{i}" if i < len(track_files) - 1 else "vout"
+        filter_parts.append(f"[{prev_label}][{i}:v]overlay=0:0[{out_label}]")
+        prev_label = out_label
+    filter_complex = ";".join(filter_parts)
+
+    cmd.extend([
+        "-filter_complex", filter_complex,
+        "-map", f"[{prev_label}]",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+        "-pix_fmt", "yuv420p",
+        "-r", str(target_fps),
+        output_file
+    ])
+
+    print(f"[BSAI Premiere Pro] Overlaying {len(track_files)} video tracks")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if result.returncode != 0:
+        print(f"[BSAI Premiere Pro] Failed to overlay video tracks:\n{result.stderr}")
+        return None
+
+    return output_file
+
+
+def _mix_audio_tracks(track_files, temp_dir):
+    """Mix multiple audio tracks using ffmpeg amix filter.
+
+    Returns the path to the mixed audio file, or None on failure.
+    """
+    ffmpeg = get_ffmpeg()
+    if not ffmpeg or not track_files:
+        return None
+
+    if len(track_files) == 1:
+        return track_files[0]
+
+    output_file = os.path.join(temp_dir, "mixed_audio.mp4")
+    cmd = [ffmpeg, "-y", "-loglevel", "error"]
+    for tf in track_files:
+        cmd.extend(["-i", tf])
+
+    inputs_str = "".join(f"[{i}:a]" for i in range(len(track_files)))
+    filter_complex = f"{inputs_str}amix=inputs={len(track_files)}:duration=longest[aout]"
+
+    cmd.extend([
+        "-filter_complex", filter_complex,
+        "-map", "[aout]",
+        "-c:a", "aac", "-b:a", "192k",
+        "-ar", "48000", "-ac", "2",
+        output_file
+    ])
+
+    print(f"[BSAI Premiere Pro] Mixing {len(track_files)} audio tracks")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if result.returncode != 0:
+        print(f"[BSAI Premiere Pro] Failed to mix audio tracks:\n{result.stderr}")
+        return None
+
+    return output_file
+
+
 def process_and_merge(timeline_data, output_filename, output_format, video_codec,
                       quality, default_transition, transition_duration):
     ffmpeg = get_ffmpeg()
     if not ffmpeg:
         return None, "ffmpeg not found"
     clips = timeline_data.get("clips", [])
-    enabled_clips = [c for c in clips if c.get("video_enabled", True) or c.get("audio_enabled", True)]
+
+    # Detect multi-track mode: any clip has track_type field
+    is_multitrack = any("track_type" in c for c in clips)
+
+    # Filter enabled clips
+    if is_multitrack:
+        enabled_clips = []
+        for c in clips:
+            tt = c.get("track_type")
+            if tt == "video":
+                if c.get("video_enabled", True):
+                    enabled_clips.append(c)
+            elif tt == "audio":
+                if c.get("audio_enabled", True):
+                    enabled_clips.append(c)
+            else:
+                # Clip without track_type in multi-track mode: treat as enabled
+                if c.get("video_enabled", True) or c.get("audio_enabled", True):
+                    enabled_clips.append(c)
+    else:
+        enabled_clips = [c for c in clips if c.get("video_enabled", True) or c.get("audio_enabled", True)]
+
     if not enabled_clips:
         return None, "No clips to merge"
+
+    # Determine target dimensions and FPS from all enabled clips
     target_w = 0
     target_h = 0
     target_fps = 30.0
@@ -411,59 +669,218 @@ def process_and_merge(timeline_data, output_filename, output_format, video_codec
         target_w += 1
     if target_h % 2 != 0:
         target_h += 1
+
     crf_map = {"high": "18", "medium": "23", "low": "28"}
     crf = crf_map.get(quality, "18")
+
+    # Resolve output path
+    try:
+        import folder_paths
+        output_dir = folder_paths.get_output_directory()
+    except Exception:
+        output_dir = os.getcwd()
+    safe_name = "".join(c for c in output_filename if c.isalnum() or c in "-_") or "premiere_pro_output"
+    output_path = os.path.join(output_dir, f"{safe_name}.{output_format}")
+    counter = 1
+    while os.path.exists(output_path):
+        output_path = os.path.join(output_dir, f"{safe_name}_{counter}.{output_format}")
+        counter += 1
+
     temp_dir = tempfile.mkdtemp(prefix="bsai_pp_")
     try:
-        processed_files = []
-        for i, clip in enumerate(enabled_clips):
-            output_file = os.path.join(temp_dir, f"clip_{i:04d}.mp4")
-            cmd = _build_clip_command(
-                clip, output_file, target_w, target_h, int(target_fps),
-                default_transition, transition_duration, i, len(enabled_clips)
+        if is_multitrack:
+            return _process_multitrack(
+                timeline_data, enabled_clips, temp_dir, output_path,
+                target_w, target_h, target_fps, crf, video_codec,
+                default_transition, transition_duration, ffmpeg
             )
-            if not cmd:
-                print(f"[BSAI Premiere Pro] Skipping clip {i}: file not found or invalid")
-                continue
-            print(f"[BSAI Premiere Pro] Processing clip {i+1}/{len(enabled_clips)}: {clip.get('file_name', 'unknown')}")
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-            if result.returncode != 0:
-                return None, f"Failed to process clip {i} ({clip.get('file_name', '')}):\n{result.stderr}"
-            processed_files.append(output_file)
-        if not processed_files:
-            return None, "No clips were successfully processed"
-        concat_file = os.path.join(temp_dir, "concat_list.txt")
-        with open(concat_file, "w", encoding="utf-8") as f:
-            for pf in processed_files:
-                escaped = pf.replace("\\", "/").replace(":", "\\:")
-                f.write(f"file '{escaped}'\n")
-        try:
-            import folder_paths
-            output_dir = folder_paths.get_output_directory()
-        except Exception:
-            output_dir = os.getcwd()
-        safe_name = "".join(c for c in output_filename if c.isalnum() or c in "-_") or "premiere_pro_output"
-        output_path = os.path.join(output_dir, f"{safe_name}.{output_format}")
-        counter = 1
-        while os.path.exists(output_path):
-            output_path = os.path.join(output_dir, f"{safe_name}_{counter}.{output_format}")
-            counter += 1
-        concat_cmd = [
-            ffmpeg, "-y", "-loglevel", "error",
-            "-f", "concat", "-safe", "0", "-i", concat_file,
-            "-c:v", video_codec, "-preset", "medium", "-crf", crf,
-            "-c:a", "aac", "-b:a", "192k",
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
-            output_path
-        ]
-        print(f"[BSAI Premiere Pro] Merging {len(processed_files)} clips -> {output_path}")
-        result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=600)
-        if result.returncode != 0:
-            return None, f"Failed to merge clips:\n{result.stderr}"
-        print(f"[BSAI Premiere Pro] Output saved: {output_path}")
-        return output_path, None
+        else:
+            return _process_legacy(
+                enabled_clips, temp_dir, output_path,
+                target_w, target_h, target_fps, crf, video_codec,
+                default_transition, transition_duration, ffmpeg
+            )
     except Exception as e:
         return None, f"Error during processing: {str(e)}"
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def _process_legacy(enabled_clips, temp_dir, output_path,
+                    target_w, target_h, target_fps, crf, video_codec,
+                    default_transition, transition_duration, ffmpeg):
+    """Legacy mode: sequential concat with both video and audio from each clip."""
+    processed_files = []
+    for i, clip in enumerate(enabled_clips):
+        output_file = os.path.join(temp_dir, f"clip_{i:04d}.mp4")
+        cmd = _build_clip_command(
+            clip, output_file, target_w, target_h, int(target_fps),
+            default_transition, transition_duration, i, len(enabled_clips)
+        )
+        if not cmd:
+            print(f"[BSAI Premiere Pro] Skipping clip {i}: file not found or invalid")
+            continue
+        print(f"[BSAI Premiere Pro] Processing clip {i+1}/{len(enabled_clips)}: {clip.get('file_name', 'unknown')}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            return None, f"Failed to process clip {i} ({clip.get('file_name', '')}):\n{result.stderr}"
+        processed_files.append(output_file)
+    if not processed_files:
+        return None, "No clips were successfully processed"
+
+    concat_file = os.path.join(temp_dir, "concat_list.txt")
+    with open(concat_file, "w", encoding="utf-8") as f:
+        for pf in processed_files:
+            escaped = pf.replace("\\", "/").replace(":", "\\:")
+            f.write(f"file '{escaped}'\n")
+
+    concat_cmd = [
+        ffmpeg, "-y", "-loglevel", "error",
+        "-f", "concat", "-safe", "0", "-i", concat_file,
+        "-c:v", video_codec, "-preset", "medium", "-crf", crf,
+        "-c:a", "aac", "-b:a", "192k",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        output_path
+    ]
+    print(f"[BSAI Premiere Pro] Merging {len(processed_files)} clips -> {output_path}")
+    result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=600)
+    if result.returncode != 0:
+        return None, f"Failed to merge clips:\n{result.stderr}"
+    print(f"[BSAI Premiere Pro] Output saved: {output_path}")
+    return output_path, None
+
+
+def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
+                        target_w, target_h, target_fps, crf, video_codec,
+                        default_transition, transition_duration, ffmpeg):
+    """Multi-track mode: process video and audio tracks separately, then combine."""
+    video_tracks = timeline_data.get("video_tracks", [])
+    audio_tracks = timeline_data.get("audio_tracks", [])
+
+    # Group clips by track_type and track_index
+    video_clips_by_track = {}
+    audio_clips_by_track = {}
+    for clip in enabled_clips:
+        tt = clip.get("track_type", "video")
+        ti = clip.get("track_index", 0)
+        if tt == "audio":
+            audio_clips_by_track.setdefault(ti, []).append(clip)
+        else:
+            video_clips_by_track.setdefault(ti, []).append(clip)
+
+    # --- Process video tracks ---
+    video_track_files = []
+    for ti in sorted(video_clips_by_track.keys()):
+        track_info = video_tracks[ti] if ti < len(video_tracks) else {}
+        if not track_info.get("visible", True):
+            print(f"[BSAI Premiere Pro] Skipping hidden video track V{ti+1}")
+            continue
+        track_clips = video_clips_by_track[ti]
+        track_clips.sort(key=lambda c: c.get("start_time", c.get("start", 0)))
+        merged = _process_track_clips(
+            track_clips, "video", ti, temp_dir,
+            target_w, target_h, int(target_fps),
+            default_transition, transition_duration
+        )
+        if merged:
+            video_track_files.append(merged)
+        else:
+            print(f"[BSAI Premiere Pro] Video track V{ti+1} produced no output")
+
+    # --- Process audio tracks ---
+    has_solo = any(at.get("solo", False) for at in audio_tracks)
+    audio_track_files = []
+    for ti in sorted(audio_clips_by_track.keys()):
+        track_info = audio_tracks[ti] if ti < len(audio_tracks) else {}
+        if track_info.get("muted", False):
+            print(f"[BSAI Premiere Pro] Skipping muted audio track A{ti+1}")
+            continue
+        if has_solo and not track_info.get("solo", False):
+            print(f"[BSAI Premiere Pro] Skipping non-solo audio track A{ti+1}")
+            continue
+        track_clips = audio_clips_by_track[ti]
+        track_clips.sort(key=lambda c: c.get("start_time", c.get("start", 0)))
+        merged = _process_track_clips(
+            track_clips, "audio", ti, temp_dir,
+            target_w, target_h, int(target_fps),
+            default_transition, transition_duration
+        )
+        if merged:
+            audio_track_files.append(merged)
+        else:
+            print(f"[BSAI Premiere Pro] Audio track A{ti+1} produced no output")
+
+    if not video_track_files and not audio_track_files:
+        return None, "No tracks were successfully processed"
+
+    # --- Overlay video tracks (V1 base, V2+ on top) ---
+    final_video = None
+    if video_track_files:
+        final_video = _overlay_video_tracks(
+            video_track_files, temp_dir, target_w, target_h, int(target_fps)
+        )
+
+    # --- Mix audio tracks ---
+    final_audio = None
+    if audio_track_files:
+        final_audio = _mix_audio_tracks(audio_track_files, temp_dir)
+
+    # --- Combine final video and audio into output ---
+    if final_video and final_audio:
+        combine_cmd = [
+            ffmpeg, "-y", "-loglevel", "error",
+            "-i", final_video, "-i", final_audio,
+            "-map", "0:v:0", "-map", "1:a:0",
+            "-c:v", video_codec, "-preset", "medium", "-crf", crf,
+            "-c:a", "aac", "-b:a", "192k",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            "-shortest",
+            output_path
+        ]
+        print(f"[BSAI Premiere Pro] Combining video and audio -> {output_path}")
+        result = subprocess.run(combine_cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            return None, f"Failed to combine video and audio:\n{result.stderr}"
+
+    elif final_video:
+        # Video only: re-encode to output with specified codec
+        cmd = [
+            ffmpeg, "-y", "-loglevel", "error",
+            "-i", final_video,
+            "-map", "0:v:0",
+            "-c:v", video_codec, "-preset", "medium", "-crf", crf,
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            output_path
+        ]
+        print(f"[BSAI Premiere Pro] Saving video-only output -> {output_path}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            return None, f"Failed to save video:\n{result.stderr}"
+
+    elif final_audio:
+        # Audio only: output with black video background
+        cmd = [
+            ffmpeg, "-y", "-loglevel", "error",
+            "-i", final_audio,
+            "-f", "lavfi", "-i", f"color=black:s={target_w}x{target_h}:r={int(target_fps)}",
+            "-map", "1:v:0", "-map", "0:a:0",
+            "-c:v", video_codec, "-preset", "medium", "-crf", crf,
+            "-c:a", "aac", "-b:a", "192k",
+            "-pix_fmt", "yuv420p",
+            "-shortest",
+            "-movflags", "+faststart",
+            output_path
+        ]
+        print(f"[BSAI Premiere Pro] Saving audio-only output with black video -> {output_path}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            return None, f"Failed to save audio:\n{result.stderr}"
+
+    else:
+        return None, "No output could be produced"
+
+    print(f"[BSAI Premiere Pro] Output saved: {output_path}")
+    return output_path, None
