@@ -1,5 +1,5 @@
-import { app } from "../../../scripts/app.js";
-import { api } from "../../../scripts/api.js";
+const app = window.comfyAPI?.app?.app ?? window.app;
+const api = window.comfyAPI?.api?.api ?? window.api;
 
 const NODE_TYPE = "BSAIPremiereProTimeline";
 const POLL_INTERVAL = 3000;
