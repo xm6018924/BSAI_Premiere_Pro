@@ -1,5 +1,5 @@
-// BSAI Premiere Pro v3 - debug marker
-console.log("[BSAI Premiere Pro] Script loaded v3");
+// BSAI Premiere Pro v4 - renamed file to bust ES module cache
+console.log("[BSAI Premiere Pro] Script loaded v4 from bsai_pp.js");
 window.__bsai_pp_loaded = true;
 
 const api = window.comfyAPI?.api?.api ?? window.api;
