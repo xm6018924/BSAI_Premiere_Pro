@@ -1,4 +1,7 @@
-const app = window.comfyAPI?.app?.app ?? window.app;
+// BSAI Premiere Pro v3 - debug marker
+console.log("[BSAI Premiere Pro] Script loaded v3");
+window.__bsai_pp_loaded = true;
+
 const api = window.comfyAPI?.api?.api ?? window.api;
 
 const NODE_TYPE = "BSAIPremiereProTimeline";
@@ -1805,7 +1808,16 @@ class TimelineEditor {
 }
 
 // ── Extension Registration ──────────────────────────────────────────
-app.registerExtension({
+function _registerBsaiPP() {
+    const app = window.comfyAPI?.app?.app ?? window.app;
+    if (!app || typeof app.registerExtension !== "function") {
+        console.log("[BSAI Premiere Pro] Waiting for app...", !!window.comfyAPI, !!window.app);
+        setTimeout(_registerBsaiPP, 200);
+        return;
+    }
+    console.log("[BSAI Premiere Pro] Registering extension, app found");
+    try {
+    app.registerExtension({
     name: "BSAI.PremierePro",
 
     async beforeRegisterNodeDef(nodeType, nodeData, appInstance) {
@@ -1989,3 +2001,9 @@ app.registerExtension({
         };
     },
 });
+    console.log("[BSAI Premiere Pro] Extension registered successfully");
+    } catch (e) {
+        console.error("[BSAI Premiere Pro] Extension registration failed:", e);
+    }
+}
+_registerBsaiPP();
