@@ -301,6 +301,67 @@ const STYLES = `
 }
 `;
 
+// ── Standalone directory browser (usable from node button) ──────────
+function browseDirectoryDialog(initialPath) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement("div");
+        overlay.className = "bsai-pp-dialog-overlay";
+        const dialog = document.createElement("div");
+        dialog.className = "bsai-pp-import-dialog";
+        dialog.style.minWidth = "500px";
+        dialog.innerHTML = `
+            <h3>📁 选择监视目录</h3>
+            <div style="display:flex;gap:6px;margin-bottom:10px;">
+                <button class="bsai-pp-btn" data-act="up">⬆ 上级</button>
+                <input type="text" data-path-input style="flex:1;background:#1a1a1a;border:1px solid #444;color:#e0e0e0;padding:4px 8px;border-radius:4px;font-size:12px;" readonly>
+            </div>
+            <div class="bsai-pp-import-list" data-dir-list style="max-height:350px;"></div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="bsai-pp-btn" data-cancel>取消</button>
+                <button class="bsai-pp-btn bsai-pp-btn-primary" data-select>选择此目录</button>
+            </div>`;
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+
+        let currentPath = "";
+
+        const loadDirs = async (path) => {
+            const listEl = dialog.querySelector("[data-dir-list]");
+            const pathEl = dialog.querySelector("[data-path-input]");
+            listEl.innerHTML = `<div style="color:#666;padding:10px;">加载中...</div>`;
+            try {
+                const resp = await api.fetchApi(`/bsai_premiere_pro/browse?path=${encodeURIComponent(path)}`);
+                const data = await resp.json();
+                if (data.error) { listEl.innerHTML = `<div style="color:#d35454;padding:10px;">${data.error}</div>`; return; }
+                currentPath = data.path;
+                pathEl.value = currentPath;
+                listEl.innerHTML = "";
+                if (data.dirs.length === 0) {
+                    listEl.innerHTML = `<div style="color:#666;padding:10px;">没有子目录</div>`;
+                }
+                for (const dir of data.dirs) {
+                    const item = document.createElement("div");
+                    item.className = "bsai-pp-import-item";
+                    item.innerHTML = `<span>📁</span><span>${escapeHtml(dir)}</span>`;
+                    item.onclick = () => loadDirs(data.path + (data.path.endsWith("\\") || data.path.endsWith("/") ? "" : "\\") + dir);
+                    listEl.appendChild(item);
+                }
+            } catch (e) {
+                listEl.innerHTML = `<div style="color:#d35454;padding:10px;">加载失败: ${e.message}</div>`;
+            }
+        };
+
+        loadDirs(initialPath || "");
+        dialog.querySelector("[data-act='up']").onclick = async () => {
+            const resp = await api.fetchApi(`/bsai_premiere_pro/browse?path=${encodeURIComponent(currentPath)}`);
+            const data = await resp.json();
+            if (data.parent !== undefined) loadDirs(data.parent);
+        };
+        dialog.querySelector("[data-cancel]").onclick = () => { overlay.remove(); resolve(null); };
+        dialog.querySelector("[data-select]").onclick = () => { overlay.remove(); resolve(currentPath); };
+    });
+}
+
 // ── AutoImporter ─────────────────────────────────────────────────────
 class AutoImporter {
     constructor(node) {
@@ -1628,6 +1689,19 @@ app.registerExtension({
                 }
             }
 
+            // Add button to browse watch directory
+            this.addWidget("button", "browse_directory", "📂 浏览监视目录", async () => {
+                const dirWidget = this.widgets?.find(w => w.name === "watch_directory");
+                const selected = await browseDirectoryDialog(dirWidget?.value || "");
+                if (selected) {
+                    if (dirWidget) dirWidget.value = selected;
+                    const importer = importerMap.get(this.id);
+                    if (importer) importer.updateNodeTitle(
+                        JSON.parse(this.widgets?.find(w => w.name === "timeline_data")?.value || '{"clips":[]}')
+                    );
+                }
+            });
+
             // Add button to open the editor
             this.addWidget("button", "open_editor", "🎬 打开时间轴编辑器", () => {
                 const editor = new TimelineEditor(this);
@@ -1635,7 +1709,7 @@ app.registerExtension({
             });
 
             // Set a reasonable size
-            this.size = [420, 260];
+            this.size = [420, 300];
 
             // Start auto-import polling
             const importer = new AutoImporter(this);
