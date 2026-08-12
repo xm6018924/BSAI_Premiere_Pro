@@ -740,6 +740,7 @@ class TimelineEditor {
         } else if (action === "solo" && trackType === "audio") {
             track.solo = !track.solo;
         } else if (action === "remove") {
+            if (track.locked) { this._toast("轨道已锁定，请先解锁再删除", "error"); return; }
             if (tracks.length <= 1) { this._toast("至少保留一个轨道", "info"); return; }
             const trackClips = this._getClipsForTrack(trackType, trackIndex);
             if (trackClips.length > 0) {
