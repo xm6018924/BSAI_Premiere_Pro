@@ -1813,29 +1813,77 @@ app.registerExtension({
 
         function _ensureButtons(node) {
             if (!node.widgets) node.widgets = [];
-            const hasBrowse = node.widgets.some(w => w.name === "browse_directory");
-            if (!hasBrowse) {
-                node.addWidget("button", "browse_directory", "📂 浏览监视目录", () => {
-                    const dirWidget = node.widgets?.find(w => w.name === "watch_directory");
-                    browseDirectoryDialog(dirWidget?.value || "").then(selected => {
-                        if (selected) {
-                            if (dirWidget) dirWidget.value = selected;
-                            const importer = importerMap.get(node.id);
-                            if (importer) {
-                                try {
-                                    importer.updateNodeTitle(JSON.parse(node.properties?.bsai_td || '{"clips":[]}'));
-                                } catch {}
+
+            if (!node.widgets.some(w => w.name === "browse_directory")) {
+                const w = {
+                    name: "browse_directory",
+                    type: "button",
+                    value: "📂 浏览监视目录",
+                    options: { default: "📂 浏览监视目录" },
+                    y: 0, width: 0, last_y: 0,
+                    callback: () => {
+                        const dirWidget = node.widgets?.find(ww => ww.name === "watch_directory");
+                        browseDirectoryDialog(dirWidget?.value || "").then(selected => {
+                            if (selected) {
+                                if (dirWidget) dirWidget.value = selected;
+                                const importer = importerMap.get(node.id);
+                                if (importer) {
+                                    try { importer.updateNodeTitle(JSON.parse(node.properties?.bsai_td || '{"clips":[]}')); } catch {}
+                                }
                             }
-                        }
-                    });
-                });
+                        });
+                    },
+                    mouse: function (e, pos, n) { this.callback(); return true; },
+                    computeSize: function (width) { return [width, 28]; },
+                    serializeValue: () => undefined,
+                    draw: function (ctx, n, width, y, height) {
+                        this.y = y; this.width = width;
+                        const margin = 10, w = width - margin * 2, h = 24;
+                        ctx.fillStyle = "#3a3a3a";
+                        ctx.beginPath();
+                        if (ctx.roundRect) ctx.roundRect(margin, y + 2, w, h, 4);
+                        else ctx.rect(margin, y + 2, w, h);
+                        ctx.fill();
+                        ctx.fillStyle = "#ddd";
+                        ctx.font = "12px sans-serif";
+                        ctx.textAlign = "center";
+                        ctx.textBaseline = "middle";
+                        ctx.fillText(this.value, margin + w / 2, y + 2 + h / 2);
+                    },
+                };
+                node.widgets.push(w);
             }
-            const hasEditor = node.widgets.some(w => w.name === "open_editor");
-            if (!hasEditor) {
-                node.addWidget("button", "open_editor", "🎬 打开时间轴编辑器", () => {
-                    const editor = new TimelineEditor(node);
-                    editor.open();
-                });
+
+            if (!node.widgets.some(w => w.name === "open_editor")) {
+                const w = {
+                    name: "open_editor",
+                    type: "button",
+                    value: "🎬 打开时间轴编辑器",
+                    options: { default: "🎬 打开时间轴编辑器" },
+                    y: 0, width: 0, last_y: 0,
+                    callback: () => {
+                        const editor = new TimelineEditor(node);
+                        editor.open();
+                    },
+                    mouse: function (e, pos, n) { this.callback(); return true; },
+                    computeSize: function (width) { return [width, 28]; },
+                    serializeValue: () => undefined,
+                    draw: function (ctx, n, width, y, height) {
+                        this.y = y; this.width = width;
+                        const margin = 10, w = width - margin * 2, h = 24;
+                        ctx.fillStyle = "#3a3a3a";
+                        ctx.beginPath();
+                        if (ctx.roundRect) ctx.roundRect(margin, y + 2, w, h, 4);
+                        else ctx.rect(margin, y + 2, w, h);
+                        ctx.fill();
+                        ctx.fillStyle = "#ddd";
+                        ctx.font = "12px sans-serif";
+                        ctx.textAlign = "center";
+                        ctx.textBaseline = "middle";
+                        ctx.fillText(this.value, margin + w / 2, y + 2 + h / 2);
+                    },
+                };
+                node.widgets.push(w);
             }
         }
 
