@@ -319,11 +319,13 @@ function browseDirectoryDialog(initialPath) {
         dialog.style.minWidth = "500px";
         dialog.innerHTML = `
             <h3>📁 选择监视目录</h3>
-            <div style="display:flex;gap:6px;margin-bottom:10px;">
+            <div style="display:flex;gap:6px;margin-bottom:8px;">
                 <button class="bsai-pp-btn" data-act="up">⬆ 上级</button>
-                <input type="text" data-path-input style="flex:1;background:#1a1a1a;border:1px solid #444;color:#e0e0e0;padding:4px 8px;border-radius:4px;font-size:12px;" readonly>
+                <input type="text" data-manual-path style="flex:1;background:#1a1a1a;border:1px solid #444;color:#e0e0e0;padding:4px 8px;border-radius:4px;font-size:12px;" placeholder="手动输入路径后回车...">
+                <button class="bsai-pp-btn" data-act="go">前往</button>
             </div>
-            <div class="bsai-pp-import-list" data-dir-list style="max-height:350px;"></div>
+            <div style="margin-bottom:8px;padding:4px 8px;background:#1a1a1a;border-radius:4px;font-size:11px;color:#888;" data-path-display>当前: </div>
+            <div class="bsai-pp-import-list" data-dir-list style="max-height:300px;"></div>
             <div style="display:flex;gap:8px;justify-content:flex-end;">
                 <button class="bsai-pp-btn" data-cancel>取消</button>
                 <button class="bsai-pp-btn bsai-pp-btn-primary" data-select>选择此目录</button>
@@ -332,20 +334,33 @@ function browseDirectoryDialog(initialPath) {
         document.body.appendChild(overlay);
 
         let currentPath = "";
+        let loadingAbort = null;
 
         const loadDirs = async (path) => {
+            if (loadingAbort) { try { loadingAbort.abort(); } catch {} }
+            loadingAbort = new AbortController();
             const listEl = dialog.querySelector("[data-dir-list]");
-            const pathEl = dialog.querySelector("[data-path-input]");
-            listEl.innerHTML = `<div style="color:#666;padding:10px;">加载中...</div>`;
+            const pathDisplay = dialog.querySelector("[data-path-display]");
+            listEl.innerHTML = `<div style="color:#666;padding:10px;">⏳ 加载中...</div>`;
+            const timeoutId = setTimeout(() => loadingAbort.abort(), 12000);
             try {
-                const resp = await api.fetchApi(`/bsai_premiere_pro/browse?path=${encodeURIComponent(path)}`);
+                const resp = await api.fetchApi(`/bsai_premiere_pro/browse?path=${encodeURIComponent(path)}`, {
+                    signal: loadingAbort.signal
+                });
+                clearTimeout(timeoutId);
                 const data = await resp.json();
-                if (data.error) { listEl.innerHTML = `<div style="color:#d35454;padding:10px;">${data.error}</div>`; return; }
+                if (data.error) {
+                    listEl.innerHTML = `<div style="color:#d35454;padding:10px;">❌ ${escapeHtml(data.error)}<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>重试</button></div>`;
+                    listEl.querySelector("[data-retry]")?.addEventListener("click", () => loadDirs(path));
+                    return;
+                }
                 currentPath = data.path;
-                pathEl.value = currentPath;
+                pathDisplay.textContent = `当前: ${currentPath}`;
+                const manualInput = dialog.querySelector("[data-manual-path]");
+                if (manualInput && !manualInput.value) manualInput.value = currentPath;
                 listEl.innerHTML = "";
                 if (data.dirs.length === 0) {
-                    listEl.innerHTML = `<div style="color:#666;padding:10px;">没有子目录</div>`;
+                    listEl.innerHTML = `<div style="color:#666;padding:10px;">📂 没有子目录</div>`;
                 }
                 for (const dir of data.dirs) {
                     const item = document.createElement("div");
@@ -355,18 +370,47 @@ function browseDirectoryDialog(initialPath) {
                     listEl.appendChild(item);
                 }
             } catch (e) {
-                listEl.innerHTML = `<div style="color:#d35454;padding:10px;">加载失败: ${e.message}</div>`;
+                clearTimeout(timeoutId);
+                if (e.name === "AbortError") {
+                    listEl.innerHTML = `<div style="color:#d35454;padding:10px;">⏱ 加载超时，请尝试手动输入路径<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>重试</button></div>`;
+                } else {
+                    listEl.innerHTML = `<div style="color:#d35454;padding:10px;">❌ 加载失败: ${escapeHtml(e.message)}<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>重试</button></div>`;
+                }
+                listEl.querySelector("[data-retry]")?.addEventListener("click", () => loadDirs(path));
             }
         };
 
         loadDirs(initialPath || "");
+
         dialog.querySelector("[data-act='up']").onclick = async () => {
-            const resp = await api.fetchApi(`/bsai_premiere_pro/browse?path=${encodeURIComponent(currentPath)}`);
-            const data = await resp.json();
-            if (data.parent !== undefined) loadDirs(data.parent);
+            try {
+                const resp = await api.fetchApi(`/bsai_premiere_pro/browse?path=${encodeURIComponent(currentPath)}`);
+                const data = await resp.json();
+                if (data.parent !== undefined) loadDirs(data.parent);
+            } catch (e) {
+                loadDirs(currentPath);
+            }
         };
-        dialog.querySelector("[data-cancel]").onclick = () => { overlay.remove(); resolve(null); };
-        dialog.querySelector("[data-select]").onclick = () => { overlay.remove(); resolve(currentPath); };
+
+        const manualInput = dialog.querySelector("[data-manual-path]");
+        const goToPath = () => {
+            const val = manualInput.value.trim();
+            if (val) loadDirs(val);
+        };
+        dialog.querySelector("[data-act='go']").onclick = goToPath;
+        manualInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); goToPath(); } };
+
+        dialog.querySelector("[data-cancel]").onclick = () => {
+            if (loadingAbort) { try { loadingAbort.abort(); } catch {} }
+            overlay.remove();
+            resolve(null);
+        };
+        dialog.querySelector("[data-select]").onclick = () => {
+            if (loadingAbort) { try { loadingAbort.abort(); } catch {} }
+            const manualVal = manualInput.value.trim();
+            overlay.remove();
+            resolve(manualVal || currentPath);
+        };
     });
 }
 
@@ -857,70 +901,14 @@ class TimelineEditor {
     }
 
     async _browseDirectory() {
-        const overlay = document.createElement("div");
-        overlay.className = "bsai-pp-dialog-overlay";
-        const dialog = document.createElement("div");
-        dialog.className = "bsai-pp-import-dialog";
-        dialog.style.minWidth = "500px";
-        dialog.innerHTML = `
-            <h3>📁 选择监视目录</h3>
-            <div style="display:flex;gap:6px;margin-bottom:10px;">
-                <button class="bsai-pp-btn" data-act="up">⬆ 上级</button>
-                <input type="text" data-path-input style="flex:1;background:#1a1a1a;border:1px solid #444;color:#e0e0e0;padding:4px 8px;border-radius:4px;font-size:12px;" readonly>
-            </div>
-            <div class="bsai-pp-import-list" data-dir-list style="max-height:350px;"></div>
-            <div style="display:flex;gap:8px;justify-content:flex-end;">
-                <button class="bsai-pp-btn" data-cancel>取消</button>
-                <button class="bsai-pp-btn bsai-pp-btn-primary" data-select>选择此目录</button>
-            </div>`;
-        overlay.appendChild(dialog);
-        document.body.appendChild(overlay);
-
-        let currentPath = "";
-
-        const loadDirs = async (path) => {
-            const listEl = dialog.querySelector("[data-dir-list]");
-            const pathEl = dialog.querySelector("[data-path-input]");
-            listEl.innerHTML = `<div style="color:#666;padding:10px;">加载中...</div>`;
-            try {
-                const resp = await api.fetchApi(`/bsai_premiere_pro/browse?path=${encodeURIComponent(path)}`);
-                const data = await resp.json();
-                if (data.error) { listEl.innerHTML = `<div style="color:#d35454;padding:10px;">${data.error}</div>`; return; }
-                currentPath = data.path;
-                pathEl.value = currentPath;
-                listEl.innerHTML = "";
-                if (data.dirs.length === 0) {
-                    listEl.innerHTML = `<div style="color:#666;padding:10px;">没有子目录</div>`;
-                }
-                for (const dir of data.dirs) {
-                    const item = document.createElement("div");
-                    item.className = "bsai-pp-import-item";
-                    item.innerHTML = `<span>📁</span><span>${escapeHtml(dir)}</span>`;
-                    item.onclick = () => loadDirs(data.path + (data.path.endsWith("\\") || data.path.endsWith("/") ? "" : "\\") + dir);
-                    listEl.appendChild(item);
-                }
-            } catch (e) {
-                listEl.innerHTML = `<div style="color:#d35454;padding:10px;">加载失败: ${e.message}</div>`;
-            }
-        };
-
-        loadDirs("");
-        dialog.querySelector("[data-act='up']").onclick = async () => {
-            const resp = await api.fetchApi(`/bsai_premiere_pro/browse?path=${encodeURIComponent(currentPath)}`);
-            const data = await resp.json();
-            if (data.parent !== undefined) loadDirs(data.parent);
-        };
-        dialog.querySelector("[data-cancel]").onclick = () => overlay.remove();
-        dialog.querySelector("[data-select]").onclick = () => {
+        const selected = await browseDirectoryDialog(this._getWidgetValue("watch_directory", ""));
+        if (selected) {
             const dirInput = this.modal.querySelector('[data-act="dir"]');
-            if (dirInput && currentPath) {
-                dirInput.value = currentPath;
-                const w = this._getWidget("watch_directory");
-                if (w) w.value = currentPath;
-                this._toast(`已选择目录: ${currentPath}`, "success");
-            }
-            overlay.remove();
-        };
+            if (dirInput) dirInput.value = selected;
+            const w = this._getWidget("watch_directory");
+            if (w) w.value = selected;
+            this._toast(`已选择目录: ${selected}`, "success");
+        }
     }
 
     _toggleBatchMode() {

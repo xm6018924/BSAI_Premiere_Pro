@@ -110,6 +110,7 @@ async def get_status(request):
 
 @PromptServer.instance.routes.get("/bsai_premiere_pro/browse")
 async def browse_directories(request):
+    import asyncio
     raw_path = request.query.get("path", "")
     path = urllib.parse.unquote(raw_path)
     if not path or path == "":
@@ -119,17 +120,36 @@ async def browse_directories(request):
             path = os.path.dirname(base)
         except Exception:
             path = os.getcwd()
-    if not os.path.isdir(path):
-        return web.json_response({"error": "Not a directory", "path": path}, status=400)
-    parent = os.path.dirname(path.rstrip(os.sep)) or path
-    if parent == path:
-        parent = ""
-    dirs = []
+
+    def _scan_dir(p):
+        if not os.path.isdir(p):
+            return None, "Not a directory"
+        parent = os.path.dirname(p.rstrip(os.sep)) or p
+        if parent == p:
+            parent = ""
+        dirs = []
+        try:
+            with os.scandir(p) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            dirs.append(entry.name)
+                    except OSError:
+                        pass
+        except PermissionError:
+            pass
+        dirs.sort()
+        return {"path": p, "parent": parent, "dirs": dirs}, None
+
     try:
-        for item in sorted(os.listdir(path)):
-            full = os.path.join(path, item)
-            if os.path.isdir(full):
-                dirs.append(item)
-    except PermissionError:
-        pass
-    return web.json_response({"path": path, "parent": parent, "dirs": dirs})
+        result, error = await asyncio.wait_for(
+            asyncio.to_thread(_scan_dir, path),
+            timeout=10.0
+        )
+        if error:
+            return web.json_response({"error": error, "path": path}, status=400)
+        return web.json_response(result)
+    except asyncio.TimeoutError:
+        return web.json_response({"error": "目录扫描超时", "path": path}, status=504)
+    except Exception as e:
+        return web.json_response({"error": str(e), "path": path}, status=500)
