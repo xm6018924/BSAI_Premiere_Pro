@@ -1,8 +1,11 @@
-// BSAI Premiere Pro v4 - renamed file to bust ES module cache
-console.log("[BSAI Premiere Pro] Script loaded v4 from bsai_pp.js");
+// BSAI Premiere Pro v5 - loaded via <script> tag injection
+if (window.__bsai_pp_loaded) {
+    // Already loaded (e.g. both import() and <script> tag), skip
+} else {
 window.__bsai_pp_loaded = true;
+console.log("[BSAI Premiere Pro] Script loaded v5 from bsai_pp.js");
 
-const api = window.comfyAPI?.api?.api ?? window.api;
+let api = window.comfyAPI?.api?.api ?? window.api;
 
 const NODE_TYPE = "BSAIPremiereProTimeline";
 const POLL_INTERVAL = 3000;
@@ -1815,7 +1818,8 @@ function _registerBsaiPP() {
         setTimeout(_registerBsaiPP, 200);
         return;
     }
-    console.log("[BSAI Premiere Pro] Registering extension, app found");
+    api = window.comfyAPI?.api?.api ?? window.api;
+    console.log("[BSAI Premiere Pro] Registering extension, app found, api:", !!api);
     try {
     app.registerExtension({
     name: "BSAI.PremierePro",
@@ -2007,3 +2011,4 @@ function _registerBsaiPP() {
     }
 }
 _registerBsaiPP();
+} // end else (not already loaded)
