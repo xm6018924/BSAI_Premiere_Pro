@@ -149,7 +149,7 @@ const STYLES = `
     overflow: hidden; position: relative; transition: border-color 0.2s, box-shadow 0.2s;
     margin: 0 1px; flex-shrink: 0; display: flex; flex-direction: column; min-width: 50px;
 }
-.bsai-pp-clip-block.video-clip { background: #2a3a4a; border-color: #3a5a7a; border-left: 3px solid #4a90d9; height: auto; max-height: 120px; }
+.bsai-pp-clip-block.video-clip { background: #2a3a4a; border-color: #3a5a7a; border-left: 3px solid #4a90d9; height: auto; }
 .bsai-pp-clip-block.audio-clip { background: #2a3a2a; border-color: #3a6a3a; border-left: 3px solid #4caf50; }
 .bsai-pp-clip-block.linked { border-left-color: #ffa726; }
 .bsai-pp-clip-block:hover { border-color: #6a8aaa; }
@@ -905,6 +905,8 @@ class TimelineEditor {
             empty.textContent = "暂无视频片段，请运行工作流生成视频或手动导入";
             container.appendChild(empty);
         }
+        // Auto-load thumbnails after timeline render so they always appear
+        this._loadThumbnails();
     }
 
     _renderRulerMarks(totalDuration) {
