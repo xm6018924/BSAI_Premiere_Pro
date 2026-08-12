@@ -505,7 +505,7 @@ def _process_track_clips(clips, track_type, track_index, temp_dir, target_w, tar
     concat_file = os.path.join(track_temp_dir, "concat_list.txt")
     with open(concat_file, "w", encoding="utf-8") as f:
         for pf in processed_files:
-            escaped = pf.replace("\\", "/").replace(":", "\\:")
+            escaped = pf.replace("\\", "/")
             f.write(f"file '{escaped}'\n")
 
     merged_file = os.path.join(temp_dir, f"merged_{track_type}_{track_index}.mp4")
@@ -732,7 +732,7 @@ def _process_legacy(enabled_clips, temp_dir, output_path,
     concat_file = os.path.join(temp_dir, "concat_list.txt")
     with open(concat_file, "w", encoding="utf-8") as f:
         for pf in processed_files:
-            escaped = pf.replace("\\", "/").replace(":", "\\:")
+            escaped = pf.replace("\\", "/")
             f.write(f"file '{escaped}'\n")
 
     concat_cmd = [
