@@ -401,9 +401,9 @@ class AutoImporter {
         const count = vClips.length;
         const total = vClips.reduce((s, c) => s + (c.trim_end - c.trim_start), 0);
         if (count > 0) {
-            this.node.title = `🎬 Premiere Pro (${count} clips / ${formatTime(total)})`;
+            this.node.title = `🎬 BSAI Premiere Pro (${count} clips / ${formatTime(total)})`;
         } else {
-            this.node.title = `🎬 Premiere Pro`;
+            this.node.title = `🎬 BSAI Premiere Pro`;
         }
         this.node.setDirtyCanvas(true, true);
     }
@@ -1620,6 +1620,9 @@ app.registerExtension({
             const tdWidget = this.widgets?.find(w => w.name === "timeline_data");
             if (tdWidget) {
                 tdWidget.computeSize = () => [0, -4];
+                tdWidget.hidden = true;
+                tdWidget.draw = () => {};
+                tdWidget.mouse = () => {};
                 if (!tdWidget.value || tdWidget.value === "") {
                     tdWidget.value = '{"clips":[],"known_files":[]}';
                 }
@@ -1659,6 +1662,9 @@ app.registerExtension({
             const tdWidget = this.widgets?.find(w => w.name === "timeline_data");
             if (tdWidget) {
                 tdWidget.computeSize = () => [0, -4];
+                tdWidget.hidden = true;
+                tdWidget.draw = () => {};
+                tdWidget.mouse = () => {};
                 const importer = importerMap.get(this.id);
                 if (importer) {
                     try {
@@ -1677,6 +1683,10 @@ app.registerExtension({
                 const tdWidget = this.widgets?.find(w => w.name === "timeline_data");
                 if (tdWidget) {
                     tdWidget.value = message.timeline_data;
+                    tdWidget.computeSize = () => [0, -4];
+                    tdWidget.hidden = true;
+                    tdWidget.draw = () => {};
+                    tdWidget.mouse = () => {};
                     const importer = importerMap.get(this.id);
                     if (importer) {
                         try {
