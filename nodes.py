@@ -82,7 +82,7 @@ class BSAIPremiereProTimeline:
         try:
             data = json.loads(timeline_data)
         except json.JSONDecodeError:
-            return {"result": ("",), "ui": {"error": "Invalid timeline data JSON"}}
+            return {"result": ("",), "ui": {"error": ["Invalid timeline data JSON"]}}
 
         if not data.get("clips"):
             data["clips"] = []
@@ -157,16 +157,16 @@ class BSAIPremiereProTimeline:
 
         clips = data.get("clips", [])
         if not clips:
-            ui = {"error": "No clips on timeline"}
+            ui = {"error": ["No clips on timeline"]}
             if timeline_updated:
-                ui["timeline_data"] = json.dumps(data)
+                ui["timeline_data"] = [json.dumps(data)]
             return {"result": ("",), "ui": ui}
 
         enabled = [c for c in clips if c.get("video_enabled", True) or c.get("audio_enabled", True)]
         if not enabled:
-            ui = {"error": "No enabled clips"}
+            ui = {"error": ["No enabled clips"]}
             if timeline_updated:
-                ui["timeline_data"] = json.dumps(data)
+                ui["timeline_data"] = [json.dumps(data)]
             return {"result": ("",), "ui": ui}
 
         output_path, error = process_and_merge(
@@ -175,23 +175,23 @@ class BSAIPremiereProTimeline:
         )
 
         if error:
-            ui = {"error": error}
+            ui = {"error": [error]}
             if timeline_updated:
-                ui["timeline_data"] = json.dumps(data)
+                ui["timeline_data"] = [json.dumps(data)]
             return {"result": ("",), "ui": ui}
 
         filename = os.path.basename(output_path) if output_path else ""
         ui = {
-            "video_path": output_path or "",
-            "filename": filename,
-            "clip_count": len(enabled),
-            "clips": [{"file_name": c.get("file_name", ""), "duration": c.get("duration", 0)} for c in enabled],
+            "video_path": [output_path or ""],
+            "filename": [filename],
+            "clip_count": [str(len(enabled))],
+            "clips": [json.dumps({"file_name": c.get("file_name", ""), "duration": c.get("duration", 0)}) for c in enabled],
         }
         if timeline_updated:
-            ui["timeline_data"] = json.dumps(data)
+            ui["timeline_data"] = [json.dumps(data)]
             _timeline_store[unique_id] = json.dumps(data)
         if merge_msg:
-            ui["merge_msg"] = merge_msg
+            ui["merge_msg"] = [merge_msg]
 
         return {
             "result": (output_path or "",),

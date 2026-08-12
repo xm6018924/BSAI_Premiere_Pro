@@ -119,6 +119,7 @@ const STYLES = `
 .bsai-pp-track-row {
     display: flex; border-bottom: 1px solid #111; min-height: 64px;
 }
+.bsai-pp-track-row.video-track { min-height: 130px; }
 .bsai-pp-track-header {
     min-width: 150px; flex-shrink: 0; background: #2a2a2a;
     border-right: 1px solid #3a3a3a; display: flex; flex-direction: column;
@@ -138,19 +139,23 @@ const STYLES = `
 .bsai-pp-track-btn.active { background: #4a90d9; color: #fff; border-color: #5a9fe8; }
 .bsai-pp-track-btn.danger:hover { background: #d35454; color: #fff; }
 .bsai-pp-track-content {
-    flex: 1; background: #1a1a1a; display: flex; align-items: center;
+    flex: 1; background: #1a1a1a; display: flex; align-items: stretch;
     gap: 0; padding: 4px 4px; overflow-x: visible; position: relative; min-height: 56px;
 }
+.bsai-pp-track-row.video-track .bsai-pp-track-content { min-height: 122px; }
 .bsai-pp-track-empty { color: #444; font-size: 11px; padding: 0 12px; }
 .bsai-pp-clip-block {
     border: 1px solid #3a3a3a; border-radius: 4px; height: 52px; cursor: pointer;
     overflow: hidden; position: relative; transition: border-color 0.2s, box-shadow 0.2s;
     margin: 0 1px; flex-shrink: 0; display: flex; flex-direction: column; min-width: 50px;
 }
-.bsai-pp-clip-block.video-clip { background: #2a3a4a; border-color: #3a5a7a; border-left: 3px solid #4a90d9; }
+.bsai-pp-clip-block.video-clip { background: #2a3a4a; border-color: #3a5a7a; border-left: 3px solid #4a90d9; height: auto; max-height: 120px; }
 .bsai-pp-clip-block.audio-clip { background: #2a3a2a; border-color: #3a6a3a; border-left: 3px solid #4caf50; }
 .bsai-pp-clip-block.linked { border-left-color: #ffa726; }
 .bsai-pp-clip-block:hover { border-color: #6a8aaa; }
+.bsai-pp-clip-block.drag-over { border-color: #ffa726; box-shadow: 0 0 12px rgba(255,167,38,0.6); transform: scale(1.02); transition: transform 0.15s; }
+.bsai-pp-clip-block[draggable="true"] { cursor: grab; }
+.bsai-pp-clip-block[draggable="true"]:active { cursor: grabbing; }
 .bsai-pp-clip-block.selected { border-color: #4a90d9; box-shadow: 0 0 8px rgba(74,144,217,0.5); }
 .bsai-pp-clip-block.batch-selected { border-color: #ff6b6b; box-shadow: 0 0 8px rgba(255,107,107,0.6); background: rgba(255,107,107,0.12); }
 .bsai-pp-clip-block.batch-selected::after { content: "✓"; position: absolute; top: 2px; right: 4px; color: #ff6b6b; font-weight: bold; font-size: 12px; }
@@ -159,7 +164,8 @@ const STYLES = `
     flex: 1; background: #111; display: flex; align-items: center;
     justify-content: center; overflow: hidden; position: relative; min-height: 30px;
 }
-.bsai-pp-clip-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.bsai-pp-clip-block.video-clip .bsai-pp-clip-thumb { min-height: 80px; }
+.bsai-pp-clip-thumb img { width: 100%; height: 100%; object-fit: contain; background: #000; }
 .bsai-pp-clip-thumb .placeholder { color: #555; font-size: 14px; }
 .bsai-pp-clip-badge {
     position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,0.7);
@@ -916,8 +922,8 @@ class TimelineEditor {
 
     _createTrackRow(trackType, trackIndex, trackInfo) {
         const row = document.createElement("div");
-        row.className = "bsai-pp-track-row";
         const isVideo = trackType === "video";
+        row.className = "bsai-pp-track-row" + (isVideo ? " video-track" : " audio-track");
         const trackName = trackInfo.name || (isVideo ? `V${trackIndex + 1}` : `A${trackIndex + 1}`);
 
         const header = document.createElement("div");
@@ -1388,6 +1394,7 @@ class TimelineEditor {
         block.style.width = width + "px";
         let badges = "";
         if (clip.linked_id) {
+            badges += `<span class="bsai-pp-clip-badge" style="color:#ffa726;" title="音视频已链接（点击编辑面板可解除）">🔗</span>`;
             const linked = this.td.clips.find(c => c.id === clip.linked_id);
             if (linked) {
                 const lDur = (linked.trim_end || linked.duration || 0) - (linked.trim_start || 0);
@@ -1457,6 +1464,41 @@ class TimelineEditor {
             rightHandle.className = "bsai-pp-clip-handle right";
             this._attachTrimHandler(rightHandle, clip, "end");
             block.appendChild(rightHandle);
+        }
+        // Drag-to-reorder (not in batch or scissor mode)
+        if (!this.batchMode && !this.scissorMode) {
+            block.draggable = true;
+            block.addEventListener("dragstart", (e) => {
+                this._dragData = { clipIndex, trackType: clip.track_type, trackIndex: clip.track_index };
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", String(clipIndex));
+                block.style.opacity = "0.5";
+            });
+            block.addEventListener("dragend", () => {
+                block.style.opacity = "";
+                this._dragData = null;
+                this._renderTimeline();
+            });
+            block.addEventListener("dragover", (e) => {
+                if (!this._dragData) return;
+                if (this._dragData.trackType !== clip.track_type || this._dragData.trackIndex !== clip.track_index) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                block.classList.add("drag-over");
+            });
+            block.addEventListener("dragleave", () => {
+                block.classList.remove("drag-over");
+            });
+            block.addEventListener("drop", (e) => {
+                e.preventDefault();
+                block.classList.remove("drag-over");
+                if (!this._dragData) return;
+                if (this._dragData.trackType !== clip.track_type || this._dragData.trackIndex !== clip.track_index) return;
+                const fromIdx = this._dragData.clipIndex;
+                const toIdx = clipIndex;
+                if (fromIdx === toIdx) return;
+                this._reorderClip(fromIdx, toIdx);
+            });
         }
         // Box-selected indicator
         if (this.boxSelected.has(clipIndex)) {
@@ -1536,10 +1578,13 @@ class TimelineEditor {
             if (linked) {
                 // Split the linked audio clip too
                 const linkedOrigTransOut = linked.transition_out;
+                const linkedOrigTrimEnd = linked.trim_end;  // Save BEFORE modifying
                 const linkedIdx = this.td.clips.indexOf(linked);
+                // Create linkedPart2 BEFORE modifying linked (so it gets the original trim_end)
+                const linkedPart2 = { ...linked, id: aId2, trim_start: splitTime, trim_end: linkedOrigTrimEnd, transition_in: "cut", transition_out: linkedOrigTransOut };
+                // Now modify the original linked clip to be part1
                 linked.trim_end = splitTime;
                 linked.transition_out = "cut";
-                const linkedPart2 = { ...linked, id: aId2, trim_start: splitTime, transition_in: "cut", transition_out: linkedOrigTransOut };
                 // Update link IDs
                 part2.linked_id = aId2;
                 linkedPart2.linked_id = vId2;
@@ -1660,25 +1705,27 @@ class TimelineEditor {
         };
         bar.querySelector('[data-box-act="delete"]').onclick = () => {
             const indices = [...this.boxSelected].sort((a, b) => b - a);
+            // Collect all clip IDs to delete (including linked partners)
+            const clipIdsToDelete = new Set();
+            const fileNamesToDelete = new Set();
             for (const idx of indices) {
                 const clip = this.td.clips[idx];
                 if (!clip) continue;
-                if (clip.linked_id) {
-                    const linked = this.td.clips.find(c => c.id === clip.linked_id);
-                    if (linked) linked.linked_id = null;
-                }
-                if (!this.td.deleted_files) this.td.deleted_files = [];
-                if (!this.td.deleted_files.includes(clip.file_name)) {
-                    this.td.deleted_files.push(clip.file_name);
-                }
-                this.td.clips.splice(idx, 1);
+                clipIdsToDelete.add(clip.id);
+                if (clip.linked_id) clipIdsToDelete.add(clip.linked_id);
+                fileNamesToDelete.add(clip.file_name);
             }
+            if (!this.td.deleted_files) this.td.deleted_files = [];
+            for (const fn of fileNamesToDelete) {
+                if (!this.td.deleted_files.includes(fn)) this.td.deleted_files.push(fn);
+            }
+            this.td.clips = this.td.clips.filter(c => !clipIdsToDelete.has(c.id));
             this.boxSelected.clear();
             this.selectedIndex = -1;
             this._save();
             this._renderAll();
             this._removeBoxBar();
-            this._toast(`已删除 ${indices.length} 个片段`, "success");
+            this._toast(`已删除 ${clipIdsToDelete.size} 个片段（含关联音视频）`, "success");
         };
         bar.querySelector('[data-box-act="clear"]').onclick = () => {
             this.boxSelected.clear();
@@ -1904,7 +1951,39 @@ class TimelineEditor {
 
         panel.querySelector('[data-act="move-left"]').onclick = () => this._moveClip(this.selectedIndex, -1);
         panel.querySelector('[data-act="move-right"]').onclick = () => this._moveClip(this.selectedIndex, 1);
-        panel.querySelector('[data-act="delete"]').onclick = () => this._deleteClip(this.selectedIndex);
+        panel.querySelector('[data-act="delete"]').onclick = () => {
+            const c = this.td.clips[this.selectedIndex];
+            if (c && c.linked_id) {
+                const linked = this.td.clips.find(x => x.id === c.linked_id);
+                const linkedName = linked ? linked.file_name : "";
+                const overlay = document.createElement("div");
+                overlay.className = "bsai-pp-dialog-overlay";
+                const dialog = document.createElement("div");
+                dialog.className = "bsai-pp-import-dialog";
+                dialog.style.minWidth = "360px";
+                dialog.innerHTML = `
+                    <h3>🗑 删除确认</h3>
+                    <div style="color:#ccc;font-size:13px;padding:10px 0;">
+                        该片段已链接音视频，删除将同时移除：<br>
+                        🎬 ${escapeHtml(c.file_name)}<br>
+                        🎵 ${escapeHtml(linkedName)}<br>
+                        <span style="color:#ff9800;">关联的音视频片段将一并删除</span>
+                    </div>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;">
+                        <button class="bsai-pp-btn" data-cancel>取消</button>
+                        <button class="bsai-pp-btn bsai-pp-btn-danger" data-confirm>确认删除</button>
+                    </div>`;
+                overlay.appendChild(dialog);
+                document.body.appendChild(overlay);
+                dialog.querySelector("[data-cancel]").onclick = () => overlay.remove();
+                dialog.querySelector("[data-confirm]").onclick = () => {
+                    overlay.remove();
+                    this._deleteClip(this.selectedIndex);
+                };
+            } else {
+                this._deleteClip(this.selectedIndex);
+            }
+        };
         const replaceBtn = panel.querySelector('[data-act="replace-video"]');
         if (replaceBtn) replaceBtn.onclick = () => this._replaceVideo(this.selectedIndex);
         const browseBtn = panel.querySelector('[data-act="browse-audio"]');
@@ -2159,10 +2238,73 @@ class TimelineEditor {
         this._renderAll();
     }
 
+    _reorderClip(fromIdx, toIdx) {
+        const clip = this.td.clips[fromIdx];
+        if (!clip) return;
+        const trackType = clip.track_type;
+        const trackIndex = clip.track_index;
+
+        // Collect all track clips arrays at once (these are filtered copies)
+        const allTracks = [];
+        for (let i = 0; i < (this.td.video_tracks || []).length; i++) {
+            allTracks.push({ type: "video", index: i, clips: this._getClipsForTrack("video", i) });
+        }
+        for (let i = 0; i < (this.td.audio_tracks || []).length; i++) {
+            allTracks.push({ type: "audio", index: i, clips: this._getClipsForTrack("audio", i) });
+        }
+
+        // Find the track to reorder
+        const targetTrack = allTracks.find(t => t.type === trackType && t.index === trackIndex);
+        if (!targetTrack) return;
+
+        const fromTrackPos = targetTrack.clips.indexOf(clip);
+        const targetClip = this.td.clips[toIdx];
+        const toTrackPos = targetTrack.clips.indexOf(targetClip);
+        if (fromTrackPos < 0 || toTrackPos < 0 || fromTrackPos === toTrackPos) return;
+
+        // Reorder within the track (modify the filtered array directly)
+        targetTrack.clips.splice(fromTrackPos, 1);
+        targetTrack.clips.splice(toTrackPos, 0, clip);
+
+        // If linked, also reorder the linked clip in its track
+        if (clip.linked_id) {
+            const linked = this.td.clips.find(c => c.id === clip.linked_id);
+            if (linked) {
+                const linkedTrack = allTracks.find(t => t.type === linked.track_type && t.index === linked.track_index);
+                if (linkedTrack) {
+                    const lFromPos = linkedTrack.clips.indexOf(linked);
+                    const lNewPos = Math.min(toTrackPos, linkedTrack.clips.length - 1);
+                    if (lFromPos >= 0 && lFromPos !== lNewPos) {
+                        linkedTrack.clips.splice(lFromPos, 1);
+                        linkedTrack.clips.splice(lNewPos, 0, linked);
+                    }
+                }
+            }
+        }
+
+        // Rebuild full clips array from all track clips arrays
+        const newClipsOrder = [];
+        for (const t of allTracks) {
+            newClipsOrder.push(...t.clips);
+        }
+        // Include any clips that don't belong to any track (safety)
+        for (const c of this.td.clips) {
+            if (!newClipsOrder.includes(c)) newClipsOrder.push(c);
+        }
+        this.td.clips = newClipsOrder;
+
+        this.selectedIndex = this.td.clips.indexOf(clip);
+        this._save();
+        this._renderAll();
+    }
+
     _deleteClip(index) {
         const clip = this.td.clips[index];
         if (!clip) return;
+        // If linked, also delete the linked partner
+        const idsToDelete = new Set([clip.id]);
         if (clip.linked_id) {
+            idsToDelete.add(clip.linked_id);
             const linked = this.td.clips.find(c => c.id === clip.linked_id);
             if (linked) linked.linked_id = null;
         }
@@ -2171,7 +2313,7 @@ class TimelineEditor {
         if (!this.td.deleted_files.includes(clip.file_name)) {
             this.td.deleted_files.push(clip.file_name);
         }
-        this.td.clips.splice(index, 1);
+        this.td.clips = this.td.clips.filter(c => !idsToDelete.has(c.id));
         if (this.selectedIndex >= this.td.clips.length) this.selectedIndex = this.td.clips.length - 1;
         this._save();
         this._renderAll();
@@ -2592,23 +2734,28 @@ function _registerBsaiPP() {
         const onExecuted = nodeType.prototype.onExecuted;
         nodeType.prototype.onExecuted = function (message) {
             onExecuted?.apply(this, arguments);
-            if (message?.timeline_data) {
+            // ComfyUI 0.32.0 wraps UI values in lists
+            const tdVal = message?.timeline_data;
+            const tdStr = Array.isArray(tdVal) ? tdVal[0] : tdVal;
+            if (tdStr) {
                 if (!this.properties) this.properties = {};
-                this.properties.bsai_td = message.timeline_data;
+                this.properties.bsai_td = tdStr;
                 _syncToServer(this);
                 const importer = importerMap.get(this.id);
                 if (importer) {
                     try {
-                        importer.updateNodeTitle(JSON.parse(message.timeline_data));
+                        importer.updateNodeTitle(JSON.parse(tdStr));
                     } catch {}
                     const editor = importer._editor;
                     if (editor) editor.refresh();
                 }
                 _forceResize(this);
             }
-            if (message?.merge_msg) {
+            const msgVal = message?.merge_msg;
+            const msgStr = Array.isArray(msgVal) ? msgVal[0] : msgVal;
+            if (msgStr) {
                 const editor = importerMap.get(this.id)?._editor;
-                if (editor) editor._toast(message.merge_msg, "info");
+                if (editor) editor._toast(msgStr, "info");
             }
         };
     },
