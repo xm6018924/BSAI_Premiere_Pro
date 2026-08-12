@@ -178,7 +178,7 @@ async def save_timeline(request):
     try:
         body = await request.json()
         node_id = str(body.get("node_id", ""))
-        timeline_data = body.get("timeline_data", '{"clips":[],"known_files":[]}')
+        timeline_data = body.get("timeline_data", '{"clips":[],"known_files":[],"deleted_files":[],"directory_history":{}}')
         if node_id:
             _timeline_store[node_id] = timeline_data
         return web.json_response({"ok": True})
@@ -189,5 +189,5 @@ async def save_timeline(request):
 @PromptServer.instance.routes.get("/bsai_premiere_pro/timeline_load")
 async def load_timeline(request):
     node_id = str(request.query.get("node_id", ""))
-    data = _timeline_store.get(node_id, '{"clips":[],"known_files":[]}')
+    data = _timeline_store.get(node_id, '{"clips":[],"known_files":[],"deleted_files":[],"directory_history":{}}')
     return web.json_response({"timeline_data": data})

@@ -74,10 +74,10 @@ class BSAIPremiereProTimeline:
                pix_fmt, crf, frame_rate, image=None, audio=None, unique_id=None):
 
         from .server import _timeline_store
-        timeline_data = _timeline_store.get(unique_id, '{"clips":[],"known_files":[]}')
+        timeline_data = _timeline_store.get(unique_id, '{"clips":[],"known_files":[],"deleted_files":[],"directory_history":{}}')
 
         if not timeline_data or not timeline_data.strip():
-            timeline_data = '{"clips":[],"known_files":[]}'
+            timeline_data = '{"clips":[],"known_files":[],"deleted_files":[],"directory_history":{}}'
 
         try:
             data = json.loads(timeline_data)
@@ -88,6 +88,10 @@ class BSAIPremiereProTimeline:
             data["clips"] = []
         if not data.get("known_files"):
             data["known_files"] = []
+        if not data.get("deleted_files"):
+            data["deleted_files"] = []
+        if not data.get("directory_history"):
+            data["directory_history"] = {}
         if not data.get("video_tracks"):
             data["video_tracks"] = [{"name": "V1", "locked": False, "visible": True}]
         if not data.get("audio_tracks"):

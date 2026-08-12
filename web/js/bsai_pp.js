@@ -313,6 +313,56 @@ const STYLES = `
     position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
     background: rgba(0,0,0,0.5); z-index: 100001;
 }
+/* ── Box selection ── */
+.bsai-pp-select-box {
+    position: absolute; border: 1px dashed #4a90d9; background: rgba(74,144,217,0.12);
+    pointer-events: none; z-index: 10;
+}
+.bsai-pp-clip-block.box-selected {
+    border-color: #ff6b6b !important; box-shadow: 0 0 8px rgba(255,107,107,0.5) !important;
+}
+/* ── Clip resize handles ── */
+.bsai-pp-clip-handle {
+    position: absolute; top: 0; width: 8px; height: 100%; cursor: ew-resize;
+    z-index: 3; background: rgba(255,255,255,0.15); opacity: 0; transition: opacity 0.15s;
+}
+.bsai-pp-clip-handle.left { left: 0; border-radius: 4px 0 0 4px; }
+.bsai-pp-clip-handle.right { right: 0; border-radius: 0 4px 4px 0; }
+.bsai-pp-clip-block:hover .bsai-pp-clip-handle { opacity: 1; }
+.bsai-pp-clip-handle:hover { background: rgba(74,144,217,0.6); }
+/* ── Scissor tool mode ── */
+.bsai-pp-toolbar .bsai-pp-btn.scissor-active {
+    background: #ff9800; border-color: #ffa726; color: #fff;
+}
+.bsai-pp-clip-block.scissor-mode { cursor: crosshair !important; }
+.bsai-pp-clip-block.scissor-mode:hover { border-color: #ff9800; box-shadow: 0 0 8px rgba(255,152,0,0.4); }
+/* ── Breadcrumb navigation ── */
+.bsai-pp-breadcrumb {
+    display: flex; align-items: center; gap: 2px; flex-wrap: wrap;
+    padding: 4px 8px; background: #1a1a1a; border-radius: 4px; margin-bottom: 8px;
+    font-size: 12px;
+}
+.bsai-pp-breadcrumb-item {
+    color: #4a90d9; cursor: pointer; padding: 2px 6px; border-radius: 3px;
+    transition: background 0.15s; white-space: nowrap;
+}
+.bsai-pp-breadcrumb-item:hover { background: #2a3a4a; text-decoration: underline; }
+.bsai-pp-breadcrumb-sep { color: #555; font-size: 10px; }
+.bsai-pp-breadcrumb-current { color: #ccc; padding: 2px 6px; font-weight: 600; }
+/* ── Directory history dropdown ── */
+.bsai-pp-history-dropdown {
+    position: absolute; z-index: 100010; background: #2a2a2a; border: 1px solid #555;
+    border-radius: 6px; padding: 4px; min-width: 250px; max-height: 300px; overflow-y: auto;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+}
+.bsai-pp-history-item {
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 4px;
+    cursor: pointer; color: #ccc; font-size: 12px; transition: background 0.15s;
+}
+.bsai-pp-history-item:hover { background: #3a3a3a; }
+.bsai-pp-history-item .hist-clips { color: #666; font-size: 10px; margin-left: auto; }
+.bsai-pp-history-item .hist-del { color: #d35454; cursor: pointer; padding: 2px 4px; }
+.bsai-pp-history-item .hist-del:hover { background: #d35454; color: #fff; border-radius: 3px; }
 `;
 
 // Inject styles immediately so directory browser dialog has CSS
@@ -331,17 +381,16 @@ function browseDirectoryDialog(initialPath) {
         overlay.className = "bsai-pp-dialog-overlay";
         const dialog = document.createElement("div");
         dialog.className = "bsai-pp-import-dialog";
-        dialog.style.minWidth = "500px";
+        dialog.style.minWidth = "560px";
         dialog.innerHTML = `
-            <h3>📁 选择监视目录</h3>
+            <h3>📁 选择目录</h3>
+            <div class="bsai-pp-breadcrumb" data-breadcrumb></div>
             <div style="display:flex;gap:6px;margin-bottom:8px;">
-                <button class="bsai-pp-btn" data-act="up">⬆ 上级</button>
-                <input type="text" data-manual-path style="flex:1;background:#1a1a1a;border:1px solid #444;color:#e0e0e0;padding:4px 8px;border-radius:4px;font-size:12px;" placeholder="手动输入路径后回车...">
+                <input type="text" data-manual-path style="flex:1;background:#1a1a1a;border:1px solid #444;color:#e0e0e0;padding:5px 8px;border-radius:4px;font-size:12px;" placeholder="输入路径后回车前往，如 C:\\Users\\...">
                 <button class="bsai-pp-btn" data-act="go">前往</button>
             </div>
-            <div style="margin-bottom:8px;padding:4px 8px;background:#1a1a1a;border-radius:4px;font-size:11px;color:#888;" data-path-display>当前: </div>
             <div class="bsai-pp-import-list" data-dir-list style="max-height:300px;"></div>
-            <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
                 <button class="bsai-pp-btn" data-cancel>取消</button>
                 <button class="bsai-pp-btn bsai-pp-btn-primary" data-select>选择此目录</button>
             </div>`;
@@ -351,11 +400,49 @@ function browseDirectoryDialog(initialPath) {
         let currentPath = "";
         let loadingAbort = null;
 
+        const renderBreadcrumb = (path) => {
+            const bcEl = dialog.querySelector("[data-breadcrumb]");
+            if (!path) {
+                bcEl.innerHTML = `<span class="bsai-pp-breadcrumb-current">💻 我的电脑</span>`;
+                return;
+            }
+            const sep = path.includes("/") ? "/" : "\\";
+            const parts = path.split(sep).filter(p => p.length > 0);
+            let html = "";
+            // Root drive (Windows) or root /
+            if (path[1] === ":") {
+                const drive = parts[0];
+                html += `<span class="bsai-pp-breadcrumb-item" data-bc-path="${drive}\\">💾 ${drive}</span>`;
+                parts.shift();
+            } else if (path.startsWith("/")) {
+                html += `<span class="bsai-pp-breadcrumb-item" data-bc-path="/">💻 根目录</span>`;
+            }
+            let acc = path[1] === ":" ? parts.length > 0 ? path.split(sep)[0] + "\\" : "" : "/";
+            for (let i = 0; i < parts.length; i++) {
+                acc = (path[1] === ":" ? acc : "") + (i > 0 || path[1] === ":" ? (path[1] === ":" ? "" : "/") : "") + parts[i];
+                if (path[1] === ":") {
+                    acc = path.split(sep).slice(0, i + 2).join(sep);
+                    if (!acc.endsWith("\\") && !acc.endsWith("/")) acc += "\\";
+                } else {
+                    acc = "/" + parts.slice(0, i + 1).join("/");
+                }
+                html += `<span class="bsai-pp-breadcrumb-sep">▸</span>`;
+                if (i < parts.length - 1) {
+                    html += `<span class="bsai-pp-breadcrumb-item" data-bc-path="${escapeHtml(acc)}">${escapeHtml(parts[i])}</span>`;
+                } else {
+                    html += `<span class="bsai-pp-breadcrumb-current">${escapeHtml(parts[i])}</span>`;
+                }
+            }
+            bcEl.innerHTML = html;
+            bcEl.querySelectorAll("[data-bc-path]").forEach(el => {
+                el.onclick = () => loadDirs(el.getAttribute("data-bc-path"));
+            });
+        };
+
         const loadDirs = async (path) => {
             if (loadingAbort) { try { loadingAbort.abort(); } catch {} }
             loadingAbort = new AbortController();
             const listEl = dialog.querySelector("[data-dir-list]");
-            const pathDisplay = dialog.querySelector("[data-path-display]");
             listEl.innerHTML = `<div style="color:#666;padding:10px;">⏳ 加载中...</div>`;
             const timeoutId = setTimeout(() => loadingAbort.abort(), 12000);
             try {
@@ -371,9 +458,10 @@ function browseDirectoryDialog(initialPath) {
                 }
                 currentPath = data.path || "";
                 const isRoot = data.is_root === true;
-                pathDisplay.textContent = isRoot ? `当前: 我的电脑` : `当前: ${currentPath}`;
+                renderBreadcrumb(currentPath);
                 const manualInput = dialog.querySelector("[data-manual-path]");
                 if (manualInput && !manualInput.value && currentPath) manualInput.value = currentPath;
+                else if (manualInput && currentPath) manualInput.value = currentPath;
                 listEl.innerHTML = "";
                 if (data.dirs.length === 0) {
                     listEl.innerHTML = `<div style="color:#666;padding:10px;">📂 没有子目录</div>`;
@@ -384,9 +472,15 @@ function browseDirectoryDialog(initialPath) {
                     const icon = isRoot ? "💾" : "📁";
                     item.innerHTML = `<span>${icon}</span><span>${escapeHtml(dir)}</span>`;
                     if (isRoot) {
-                        item.onclick = () => loadDirs(dir);
+                        item.ondblclick = () => loadDirs(dir);
+                        item.onclick = () => { /* single click selects */ };
                     } else {
-                        item.onclick = () => loadDirs(currentPath + (currentPath.endsWith("\\") || currentPath.endsWith("/") ? "" : "\\") + dir);
+                        const fullPath = currentPath + (currentPath.endsWith("\\") || currentPath.endsWith("/") ? "" : "\\") + dir;
+                        item.ondblclick = () => loadDirs(fullPath);
+                        item.onclick = () => {
+                            listEl.querySelectorAll(".bsai-pp-import-item").forEach(i => i.style.background = "");
+                            item.style.background = "#3a3a4a";
+                        };
                     }
                     listEl.appendChild(item);
                 }
@@ -402,21 +496,6 @@ function browseDirectoryDialog(initialPath) {
         };
 
         loadDirs(initialPath || "");
-
-        dialog.querySelector("[data-act='up']").onclick = async () => {
-            if (!currentPath) return;
-            try {
-                const resp = await api.fetchApi(`/bsai_premiere_pro/browse?path=${encodeURIComponent(currentPath)}`);
-                const data = await resp.json();
-                if (data.parent !== undefined && data.parent !== "") {
-                    loadDirs(data.parent);
-                } else {
-                    loadDirs("");
-                }
-            } catch (e) {
-                loadDirs("");
-            }
-        };
 
         const manualInput = dialog.querySelector("[data-manual-path]");
         const goToPath = () => {
@@ -486,6 +565,7 @@ class AutoImporter {
         try { td = JSON.parse(this.node.properties?.bsai_td || '{}'); } catch { td = { clips: [], known_files: [], filter_audio_only: true }; }
         if (!td.clips) td.clips = [];
         if (!td.known_files) td.known_files = [];
+        if (!td.deleted_files) td.deleted_files = [];
         if (td.filter_audio_only === undefined) td.filter_audio_only = true;
         if (!td.video_tracks) td.video_tracks = [{ name: "V1", locked: false, visible: true }];
         if (!td.audio_tracks) td.audio_tracks = [{ name: "A1", locked: false, muted: false, solo: false }];
@@ -494,7 +574,8 @@ class AutoImporter {
             if (editor) td.clips = editor._migrateClips(td.clips);
         }
         const known = new Set(td.known_files);
-        const newFiles = files.filter(f => !known.has(f.file_name));
+        const deleted = new Set(td.deleted_files);
+        const newFiles = files.filter(f => !known.has(f.file_name) && !deleted.has(f.file_name));
         if (newFiles.length === 0) return;
         let skipped = 0;
         for (const file of newFiles) {
@@ -563,6 +644,8 @@ class TimelineEditor {
         this.selectedIndex = -1;
         this.batchMode = false;
         this.batchSelected = new Set();
+        this.scissorMode = false;
+        this.boxSelected = new Set();
         this.thumbCache = new Map();
         this.td = this._load();
     }
@@ -574,6 +657,8 @@ class TimelineEditor {
                 const td = JSON.parse(val);
                 if (!td.clips) td.clips = [];
                 if (!td.known_files) td.known_files = [];
+                if (!td.deleted_files) td.deleted_files = [];
+                if (!td.directory_history) td.directory_history = {};
                 if (td.filter_audio_only === undefined) td.filter_audio_only = true;
                 if (!td.video_tracks) td.video_tracks = [{ name: "V1", locked: false, visible: true }];
                 if (!td.audio_tracks) td.audio_tracks = [{ name: "A1", locked: false, muted: false, solo: false }];
@@ -584,7 +669,7 @@ class TimelineEditor {
             } catch { /* fall through */ }
         }
         return {
-            clips: [], known_files: [],
+            clips: [], known_files: [], deleted_files: [], directory_history: {},
             video_tracks: [{ name: "V1", locked: false, visible: true }],
             audio_tracks: [{ name: "A1", locked: false, muted: false, solo: false }],
         };
@@ -651,6 +736,8 @@ class TimelineEditor {
     close() {
         this.batchMode = false;
         this.batchSelected.clear();
+        this.scissorMode = false;
+        this.boxSelected.clear();
         this._save();
         const importer = importerMap.get(this.node.id);
         if (importer) importer.setEditor(null);
@@ -690,6 +777,9 @@ class TimelineEditor {
                     <input type="checkbox" data-act="filter-audio" ${this.td.filter_audio_only !== false ? "checked" : ""}>
                     <button class="bsai-pp-btn" data-act="scan">🔍 扫描</button>
                     <button class="bsai-pp-btn" data-act="manual-import">📥 手动导入</button>
+                    <button class="bsai-pp-btn" data-act="import-external">📂 添加外部文件</button>
+                    <button class="bsai-pp-btn" data-act="dir-history">📚 历史目录</button>
+                    <button class="bsai-pp-btn" data-act="scissor" id="bsai-pp-scissor-btn">✂️ 剪刀</button>
                     <button class="bsai-pp-btn" data-act="add-vtrack">＋ 视频轨道</button>
                     <button class="bsai-pp-btn" data-act="add-atrack">＋ 音频轨道</button>
                     <button class="bsai-pp-btn bsai-pp-btn-danger" data-act="clear-all">🗑 清空全部</button>
@@ -737,6 +827,9 @@ class TimelineEditor {
         };
         this.modal.querySelector('[data-act="scan"]').onclick = () => this._scanNow();
         this.modal.querySelector('[data-act="manual-import"]').onclick = () => this._manualImport();
+        this.modal.querySelector('[data-act="import-external"]').onclick = () => this._importExternalFiles();
+        this.modal.querySelector('[data-act="dir-history"]').onclick = (e) => this._showDirHistory(e);
+        this.modal.querySelector('[data-act="scissor"]').onclick = () => this._toggleScissorMode();
         this.modal.querySelector('[data-act="browse-dir"]').onclick = () => this._browseDirectory();
         this.modal.querySelector('[data-act="add-vtrack"]').onclick = () => this._addVideoTrack();
         this.modal.querySelector('[data-act="add-atrack"]').onclick = () => this._addAudioTrack();
@@ -880,6 +973,7 @@ class TimelineEditor {
             });
         }
         row.appendChild(content);
+        this._attachBoxSelection(content, trackType, trackIndex);
         return row;
     }
 
@@ -938,14 +1032,189 @@ class TimelineEditor {
     }
 
     async _browseDirectory() {
-        const selected = await browseDirectoryDialog(this._getWidgetValue("watch_directory", ""));
-        if (selected) {
+        const oldDir = this._getWidgetValue("watch_directory", "");
+        const selected = await browseDirectoryDialog(oldDir);
+        if (selected && selected !== oldDir) {
+            // Save current timeline state to directory_history
+            if (!this.td.directory_history) this.td.directory_history = {};
+            if (oldDir) {
+                this.td.directory_history[oldDir] = {
+                    clips: JSON.parse(JSON.stringify(this.td.clips || [])),
+                    known_files: JSON.parse(JSON.stringify(this.td.known_files || [])),
+                    deleted_files: JSON.parse(JSON.stringify(this.td.deleted_files || [])),
+                    video_tracks: JSON.parse(JSON.stringify(this.td.video_tracks || [])),
+                    audio_tracks: JSON.parse(JSON.stringify(this.td.audio_tracks || [])),
+                };
+            }
+            // Restore or initialize new directory state
+            const hist = this.td.directory_history[selected];
+            if (hist) {
+                this.td.clips = JSON.parse(JSON.stringify(hist.clips || []));
+                this.td.known_files = JSON.parse(JSON.stringify(hist.known_files || []));
+                this.td.deleted_files = JSON.parse(JSON.stringify(hist.deleted_files || []));
+                this.td.video_tracks = JSON.parse(JSON.stringify(hist.video_tracks || [{ name: "V1", locked: false, visible: true }]));
+                this.td.audio_tracks = JSON.parse(JSON.stringify(hist.audio_tracks || [{ name: "A1", locked: false, muted: false, solo: false }]));
+                this._toast(`已切换到目录: ${selected} (恢复 ${this.td.clips.length} 个片段)`, "success");
+            } else {
+                // New directory: clear timeline and scan
+                this.td.clips = [];
+                this.td.known_files = [];
+                this.td.deleted_files = [];
+                this._toast(`已切换到新目录: ${selected}，正在扫描...`, "info");
+            }
+            this.selectedIndex = -1;
             const dirInput = this.modal.querySelector('[data-act="dir"]');
             if (dirInput) dirInput.value = selected;
             const w = this._getWidget("watch_directory");
             if (w) w.value = selected;
-            this._toast(`已选择目录: ${selected}`, "success");
+            this._save();
+            this._renderAll();
+            // Auto-scan new directory
+            if (!hist) {
+                setTimeout(() => this._scanNow(), 100);
+            }
         }
+    }
+
+    _showDirHistory(e) {
+        // Remove existing dropdown
+        document.querySelectorAll(".bsai-pp-history-dropdown").forEach(d => d.remove());
+        if (!this.td.directory_history || Object.keys(this.td.directory_history).length === 0) {
+            this._toast("暂无历史目录记录", "info");
+            return;
+        }
+        const dropdown = document.createElement("div");
+        dropdown.className = "bsai-pp-history-dropdown";
+        const currentDir = this._getWidgetValue("watch_directory", "");
+        let html = "";
+        // Add current directory
+        const currentClips = (this.td.clips || []).filter(c => c.track_type === "video").length;
+        html += `<div class="bsai-pp-history-item" data-dir="${escapeHtml(currentDir)}" style="background:#2a3a4a;">
+            <span>📍</span><span>${escapeHtml(currentDir || "未设置")}</span>
+            <span class="hist-clips">${currentClips} 片段 (当前)</span>
+        </div>`;
+        // Add history entries
+        for (const [dir, state] of Object.entries(this.td.directory_history)) {
+            if (dir === currentDir) continue;
+            const clipCount = (state.clips || []).filter(c => c.track_type === "video").length;
+            html += `<div class="bsai-pp-history-item" data-dir="${escapeHtml(dir)}">
+                <span>📁</span><span>${escapeHtml(dir)}</span>
+                <span class="hist-clips">${clipCount} 片段</span>
+                <span class="hist-del" data-del-dir="${escapeHtml(dir)}" title="删除历史">✕</span>
+            </div>`;
+        }
+        dropdown.innerHTML = html;
+        document.body.appendChild(dropdown);
+        // Position near button
+        const btnRect = e.target.getBoundingClientRect();
+        dropdown.style.left = btnRect.left + "px";
+        dropdown.style.top = (btnRect.bottom + 4) + "px";
+        // Handle clicks
+        dropdown.querySelectorAll(".bsai-pp-history-item").forEach(item => {
+            item.onclick = async (ev) => {
+                if (ev.target.classList.contains("hist-del")) {
+                    ev.stopPropagation();
+                    const delDir = ev.target.getAttribute("data-del-dir");
+                    delete this.td.directory_history[delDir];
+                    this._save();
+                    dropdown.remove();
+                    this._toast(`已删除历史记录: ${delDir}`, "info");
+                    return;
+                }
+                const dir = item.getAttribute("data-dir");
+                if (dir && dir !== currentDir) {
+                    await this._switchToDirectory(dir);
+                }
+                dropdown.remove();
+            };
+        });
+        // Close on outside click
+        const closeHandler = (ev) => {
+            if (!dropdown.contains(ev.target)) {
+                dropdown.remove();
+                document.removeEventListener("mousedown", closeHandler);
+            }
+        };
+        setTimeout(() => document.addEventListener("mousedown", closeHandler), 10);
+    }
+
+    async _switchToDirectory(newDir) {
+        const oldDir = this._getWidgetValue("watch_directory", "");
+        if (newDir === oldDir) return;
+        // Save current state
+        if (!this.td.directory_history) this.td.directory_history = {};
+        if (oldDir) {
+            this.td.directory_history[oldDir] = {
+                clips: JSON.parse(JSON.stringify(this.td.clips || [])),
+                known_files: JSON.parse(JSON.stringify(this.td.known_files || [])),
+                deleted_files: JSON.parse(JSON.stringify(this.td.deleted_files || [])),
+                video_tracks: JSON.parse(JSON.stringify(this.td.video_tracks || [])),
+                audio_tracks: JSON.parse(JSON.stringify(this.td.audio_tracks || [])),
+            };
+        }
+        // Restore or initialize
+        const hist = this.td.directory_history[newDir];
+        if (hist) {
+            this.td.clips = JSON.parse(JSON.stringify(hist.clips || []));
+            this.td.known_files = JSON.parse(JSON.stringify(hist.known_files || []));
+            this.td.deleted_files = JSON.parse(JSON.stringify(hist.deleted_files || []));
+            this.td.video_tracks = JSON.parse(JSON.stringify(hist.video_tracks || [{ name: "V1", locked: false, visible: true }]));
+            this.td.audio_tracks = JSON.parse(JSON.stringify(hist.audio_tracks || [{ name: "A1", locked: false, muted: false, solo: false }]));
+            this._toast(`已切换到: ${newDir} (恢复 ${this.td.clips.filter(c=>c.track_type==="video").length} 个片段)`, "success");
+        } else {
+            this.td.clips = [];
+            this.td.known_files = [];
+            this.td.deleted_files = [];
+            this._toast(`已切换到新目录: ${newDir}，正在扫描...`, "info");
+        }
+        this.selectedIndex = -1;
+        const dirInput = this.modal.querySelector('[data-act="dir"]');
+        if (dirInput) dirInput.value = newDir;
+        const w = this._getWidget("watch_directory");
+        if (w) w.value = newDir;
+        this._save();
+        this._renderAll();
+        if (!hist) setTimeout(() => this._scanNow(), 100);
+    }
+
+    async _importExternalFiles() {
+        const selected = await browseDirectoryDialog("");
+        if (!selected) return;
+        this._toast(`正在扫描目录: ${selected}`, "info");
+        try {
+            const resp = await api.fetchApi(`/bsai_premiere_pro/scan?directory=${encodeURIComponent(selected)}`);
+            const data = await resp.json();
+            const files = data.files || [];
+            if (files.length === 0) {
+                this._toast("该目录中没有视频文件", "info");
+                return;
+            }
+            const known = new Set(this.td.known_files || []);
+            this._showImportDialog(files, known);
+        } catch (e) {
+            this._toast("扫描外部目录失败: " + e.message, "error");
+        }
+    }
+
+    _toggleScissorMode() {
+        this.scissorMode = !this.scissorMode;
+        const btn = this.modal.querySelector("#bsai-pp-scissor-btn");
+        if (btn) {
+            btn.classList.toggle("scissor-active", this.scissorMode);
+            btn.textContent = this.scissorMode ? "✂️ 剪刀(开)" : "✂️ 剪刀";
+        }
+        if (this.scissorMode) {
+            this.batchMode = false;
+            this.batchSelected.clear();
+            this._removeBatchBar();
+            const batchBtn = this.modal.querySelector("#bsai-pp-batch-btn");
+            if (batchBtn) {
+                batchBtn.textContent = "☑ 批量选择";
+                batchBtn.classList.remove("bsai-pp-btn-danger");
+            }
+        }
+        this._renderTimeline();
+        this._toast(this.scissorMode ? "剪刀模式已开启，点击片段进行分割" : "剪刀模式已关闭", this.scissorMode ? "info" : "success");
     }
 
     _toggleBatchMode() {
@@ -953,6 +1222,15 @@ class TimelineEditor {
         if (!this.batchMode) {
             this.batchSelected.clear();
             this._removeBatchBar();
+        } else {
+            // Clear other selection modes
+            this.boxSelected.clear();
+            this._removeBoxBar();
+            if (this.scissorMode) {
+                this.scissorMode = false;
+                const sBtn = this.modal.querySelector("#bsai-pp-scissor-btn");
+                if (sBtn) { sBtn.classList.remove("scissor-active"); sBtn.textContent = "✂️ 剪刀"; }
+            }
         }
         const btn = this.modal.querySelector("#bsai-pp-batch-btn");
         if (btn) {
@@ -1037,6 +1315,11 @@ class TimelineEditor {
             }
             this.td.clips = this.td.clips.filter(c => !clipIdsToDelete.has(c.id));
             this.td.known_files = (this.td.known_files || []).filter(f => !fileNamesToDelete.has(f));
+            // Track deleted files to prevent auto-reimport
+            if (!this.td.deleted_files) this.td.deleted_files = [];
+            for (const fn of fileNamesToDelete) {
+                if (!this.td.deleted_files.includes(fn)) this.td.deleted_files.push(fn);
+            }
             this.batchSelected.clear();
             this.selectedIndex = -1;
             this._save();
@@ -1073,6 +1356,12 @@ class TimelineEditor {
         document.body.appendChild(overlay);
         dialog.querySelector("[data-cancel]").onclick = () => overlay.remove();
         dialog.querySelector("[data-confirm]").onclick = () => {
+            // Track all deleted files to prevent auto-reimport
+            if (!this.td.deleted_files) this.td.deleted_files = [];
+            const allFileNames = new Set((this.td.clips || []).map(c => c.file_name));
+            for (const fn of allFileNames) {
+                if (!this.td.deleted_files.includes(fn)) this.td.deleted_files.push(fn);
+            }
             this.td.clips = [];
             this.td.known_files = [];
             this.selectedIndex = -1;
@@ -1086,6 +1375,7 @@ class TimelineEditor {
     _createClipBlock(clip, clipIndex) {
         const block = document.createElement("div");
         block.className = "bsai-pp-clip-block";
+        block.setAttribute("data-clip-idx", clipIndex);
         const isVideo = clip.track_type === "video";
         block.classList.add(isVideo ? "video-clip" : "audio-clip");
         if (clip.linked_id) block.classList.add("linked");
@@ -1133,10 +1423,273 @@ class TimelineEditor {
                 this._renderTimeline();
                 this._renderBatchBar();
             };
+        } else if (this.scissorMode) {
+            block.classList.add("scissor-mode");
+            block.onclick = (e) => {
+                e.stopPropagation();
+                this._splitClip(clip, clipIndex, e);
+            };
         } else {
-            block.onclick = () => { this.selectedIndex = clipIndex; this._renderAll(); };
+            block.onclick = (e) => {
+                if (e.shiftKey) {
+                    // Shift+click for multi-select
+                    if (this.boxSelected.has(clipIndex)) {
+                        this.boxSelected.delete(clipIndex);
+                    } else {
+                        this.boxSelected.add(clipIndex);
+                    }
+                    this._renderTimeline();
+                    this._renderBoxBar();
+                } else {
+                    this.selectedIndex = clipIndex;
+                    this.boxSelected.clear();
+                    this._renderAll();
+                }
+            };
+        }
+        // Add resize handles for trim
+        if (!this.batchMode && !this.scissorMode) {
+            const leftHandle = document.createElement("div");
+            leftHandle.className = "bsai-pp-clip-handle left";
+            this._attachTrimHandler(leftHandle, clip, "start");
+            block.appendChild(leftHandle);
+            const rightHandle = document.createElement("div");
+            rightHandle.className = "bsai-pp-clip-handle right";
+            this._attachTrimHandler(rightHandle, clip, "end");
+            block.appendChild(rightHandle);
+        }
+        // Box-selected indicator
+        if (this.boxSelected.has(clipIndex)) {
+            block.classList.add("box-selected");
         }
         return block;
+    }
+
+    _attachTrimHandler(handle, clip, which) {
+        handle.onmousedown = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            const startX = e.clientX;
+            const pps = this._pps || 15;
+            const origTrimStart = clip.trim_start || 0;
+            const origTrimEnd = clip.trim_end || clip.duration || 0;
+            const dur = clip.duration || 0;
+            const linked = clip.linked_id ? this.td.clips.find(c => c.id === clip.linked_id) : null;
+            const onMove = (ev) => {
+                const dx = ev.clientX - startX;
+                const dt = dx / pps;
+                if (which === "start") {
+                    let newStart = Math.max(0, Math.min(origTrimStart + dt, origTrimEnd - 0.1));
+                    clip.trim_start = newStart;
+                    if (linked) linked.trim_start = newStart;
+                } else {
+                    let newEnd = Math.max(origTrimStart + 0.1, Math.min(origTrimEnd + dt, dur));
+                    clip.trim_end = newEnd;
+                    if (linked) linked.trim_end = newEnd;
+                }
+                this._save();
+                this._renderTimeline();
+                this._renderFooter();
+            };
+            const onUp = () => {
+                document.removeEventListener("mousemove", onMove);
+                document.removeEventListener("mouseup", onUp);
+                this._renderEditPanel();
+            };
+            document.addEventListener("mousemove", onMove);
+            document.addEventListener("mouseup", onUp);
+        };
+    }
+
+    _splitClip(clip, clipIndex, event) {
+        const block = event.currentTarget;
+        const rect = block.getBoundingClientRect();
+        const clickX = event.clientX - rect.left;
+        const blockWidth = rect.width;
+        const clipDur = (clip.trim_end || clip.duration || 0) - (clip.trim_start || 0);
+        const pps = this._pps || 15;
+        // Calculate split point in seconds relative to clip
+        const splitOffset = clickX / pps;
+        const splitTime = (clip.trim_start || 0) + splitOffset;
+        if (splitOffset < 0.2 || splitOffset > clipDur - 0.2) {
+            this._toast("请在片段中间位置点击进行分割", "info");
+            return;
+        }
+        // Create two clips from the original
+        const vId1 = `clip_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+        const aId1 = `clip_${Date.now() + 1}_${Math.random().toString(36).substr(2, 6)}`;
+        const vId2 = `clip_${Date.now() + 2}_${Math.random().toString(36).substr(2, 6)}`;
+        const aId2 = `clip_${Date.now() + 3}_${Math.random().toString(36).substr(2, 6)}`;
+        // First part: trim_start to splitTime
+        const part1 = { ...clip, id: vId1, trim_end: splitTime, transition_out: "cut" };
+        const part1Audio = clip.linked_id ? this.td.clips.find(c => c.id === clip.linked_id) : null;
+        // Second part: splitTime to trim_end
+        const part2 = { ...clip, id: vId2, trim_start: splitTime, transition_in: "cut", transition_out: clip.transition_out };
+        // Update original clip to be part1
+        clip.trim_end = splitTime;
+        clip.transition_out = "cut";
+        // Insert part2 after the original clip in the clips array
+        const insertIdx = clipIndex + 1;
+        // Handle linked audio
+        if (clip.linked_id) {
+            const linked = this.td.clips.find(c => c.id === clip.linked_id);
+            if (linked) {
+                // Split the linked audio clip too
+                const linkedOrigTransOut = linked.transition_out;
+                const linkedIdx = this.td.clips.indexOf(linked);
+                linked.trim_end = splitTime;
+                linked.transition_out = "cut";
+                const linkedPart2 = { ...linked, id: aId2, trim_start: splitTime, transition_in: "cut", transition_out: linkedOrigTransOut };
+                // Update link IDs
+                part2.linked_id = aId2;
+                linkedPart2.linked_id = vId2;
+                // Insert part2 clips
+                this.td.clips.splice(insertIdx, 0, part2);
+                const linkedInsertIdx = linkedIdx < insertIdx ? linkedIdx + 2 : linkedIdx + 1;
+                this.td.clips.splice(linkedInsertIdx, 0, linkedPart2);
+            } else {
+                this.td.clips.splice(insertIdx, 0, part2);
+            }
+        } else {
+            // No link: only split this clip (separated mode)
+            part2.linked_id = null;
+            this.td.clips.splice(insertIdx, 0, part2);
+        }
+        this._save();
+        this._renderAll();
+        this._toast("片段已分割", "success");
+    }
+
+    _attachBoxSelection(contentEl, trackType, trackIndex) {
+        let isSelecting = false;
+        let selBox = null;
+        let startX = 0, startY = 0;
+        contentEl.onmousedown = (e) => {
+            // Only start box selection if clicking on empty area (not on a clip)
+            if (e.target.closest(".bsai-pp-clip-block") || e.target.closest(".bsai-pp-transition-arrow")) return;
+            if (this.batchMode || this.scissorMode) return;
+            isSelecting = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            const rect = contentEl.getBoundingClientRect();
+            selBox = document.createElement("div");
+            selBox.className = "bsai-pp-select-box";
+            selBox.style.left = (startX - rect.left) + "px";
+            selBox.style.top = (startY - rect.top) + "px";
+            selBox.style.width = "0px";
+            selBox.style.height = "0px";
+            contentEl.appendChild(selBox);
+            e.preventDefault();
+            const onMove = (ev) => {
+                if (!isSelecting) return;
+                const curX = ev.clientX;
+                const curY = ev.clientY;
+                const left = Math.min(startX, curX) - rect.left;
+                const top = Math.min(startY, curY) - rect.top;
+                const width = Math.abs(curX - startX);
+                const height = Math.abs(curY - startY);
+                selBox.style.left = left + "px";
+                selBox.style.top = top + "px";
+                selBox.style.width = width + "px";
+                selBox.style.height = height + "px";
+            };
+            const onUp = (ev) => {
+                isSelecting = false;
+                document.removeEventListener("mousemove", onMove);
+                document.removeEventListener("mouseup", onUp);
+                // Select clips that intersect with the selection box
+                const boxRect = selBox.getBoundingClientRect();
+                const clips = this._getClipsForTrack(trackType, trackIndex);
+                clips.forEach(clip => {
+                    const clipIdx = this.td.clips.indexOf(clip);
+                    const clipBlock = contentEl.querySelector(`[data-clip-idx="${clipIdx}"]`);
+                    if (clipBlock) {
+                        const clipRect = clipBlock.getBoundingClientRect();
+                        if (!(boxRect.right < clipRect.left || boxRect.left > clipRect.right ||
+                              boxRect.bottom < clipRect.top || boxRect.top > clipRect.bottom)) {
+                            this.boxSelected.add(clipIdx);
+                        }
+                    }
+                });
+                selBox.remove();
+                if (this.boxSelected.size > 0) {
+                    this._renderTimeline();
+                    this._renderBoxBar();
+                }
+            };
+            document.addEventListener("mousemove", onMove);
+            document.addEventListener("mouseup", onUp);
+        };
+    }
+
+    _renderBoxBar() {
+        if (this.boxSelected.size === 0) {
+            this._removeBoxBar();
+            return;
+        }
+        let bar = this.modal.querySelector("#bsai-pp-box-bar");
+        if (!bar) {
+            bar = document.createElement("div");
+            bar.id = "bsai-pp-box-bar";
+            bar.className = "bsai-pp-batch-bar";
+            this.modal.querySelector(".bsai-pp-modal").insertBefore(
+                bar, this.modal.querySelector(".bsai-pp-footer")
+            );
+        }
+        const count = this.boxSelected.size;
+        bar.innerHTML = `
+            <span class="bsai-pp-batch-info">框选 <strong>${count}</strong> 个片段</span>
+            <button class="bsai-pp-btn" data-box-act="move-left">◀ 左移</button>
+            <button class="bsai-pp-btn" data-box-act="move-right">右移 ▶</button>
+            <button class="bsai-pp-btn bsai-pp-btn-danger" data-box-act="delete">🗑 删除选中</button>
+            <button class="bsai-pp-btn" data-box-act="clear">取消选择</button>`;
+        bar.querySelector('[data-box-act="move-left"]').onclick = () => {
+            const indices = [...this.boxSelected].sort((a, b) => a - b);
+            for (const idx of indices) this._moveClip(idx, -1);
+            // Update boxSelected indices after move
+            this.boxSelected.clear();
+            this._renderTimeline();
+            this._renderBoxBar();
+        };
+        bar.querySelector('[data-box-act="move-right"]').onclick = () => {
+            const indices = [...this.boxSelected].sort((a, b) => b - a);
+            for (const idx of indices) this._moveClip(idx, 1);
+            this.boxSelected.clear();
+            this._renderTimeline();
+            this._renderBoxBar();
+        };
+        bar.querySelector('[data-box-act="delete"]').onclick = () => {
+            const indices = [...this.boxSelected].sort((a, b) => b - a);
+            for (const idx of indices) {
+                const clip = this.td.clips[idx];
+                if (!clip) continue;
+                if (clip.linked_id) {
+                    const linked = this.td.clips.find(c => c.id === clip.linked_id);
+                    if (linked) linked.linked_id = null;
+                }
+                if (!this.td.deleted_files) this.td.deleted_files = [];
+                if (!this.td.deleted_files.includes(clip.file_name)) {
+                    this.td.deleted_files.push(clip.file_name);
+                }
+                this.td.clips.splice(idx, 1);
+            }
+            this.boxSelected.clear();
+            this.selectedIndex = -1;
+            this._save();
+            this._renderAll();
+            this._removeBoxBar();
+            this._toast(`已删除 ${indices.length} 个片段`, "success");
+        };
+        bar.querySelector('[data-box-act="clear"]').onclick = () => {
+            this.boxSelected.clear();
+            this._renderTimeline();
+            this._removeBoxBar();
+        };
+    }
+
+    _removeBoxBar() {
+        const bar = this.modal.querySelector("#bsai-pp-box-bar");
+        if (bar) bar.remove();
     }
 
     _showTransitionPopup(anchor, clipIndex) {
@@ -1435,7 +1988,8 @@ class TimelineEditor {
             const data = await resp.json();
             if (data.files && data.files.length > 0) {
                 const known = new Set(this.td.known_files || []);
-                const newFiles = data.files.filter(f => !known.has(f.file_name));
+                const deleted = new Set(this.td.deleted_files || []);
+                const newFiles = data.files.filter(f => !known.has(f.file_name) && !deleted.has(f.file_name));
                 if (newFiles.length > 0) {
                     let added = 0;
                     for (const file of newFiles) {
@@ -1489,6 +2043,10 @@ class TimelineEditor {
             this.td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: vId, is_video_part: false });
             if (!this.td.known_files) this.td.known_files = [];
             this.td.known_files.push(file.file_name);
+            // Remove from deleted_files so it can be auto-imported again
+            if (this.td.deleted_files) {
+                this.td.deleted_files = this.td.deleted_files.filter(f => f !== file.file_name);
+            }
             return true;
         } catch (e) {
             this._toast(`导入失败: ${file.file_name}`, "error");
@@ -1519,6 +2077,7 @@ class TimelineEditor {
     }
 
     _showImportDialog(files, knownSet) {
+        const deletedSet = new Set(this.td.deleted_files || []);
         const overlay = document.createElement("div");
         overlay.className = "bsai-pp-dialog-overlay";
         const dialog = document.createElement("div");
@@ -1526,13 +2085,15 @@ class TimelineEditor {
         dialog.innerHTML = `
             <h3>选择要导入的视频文件</h3>
             <div class="bsai-pp-import-list">
-                ${files.map(f => `
-                    <div class="bsai-pp-import-item" data-path="${escapeHtml(f.file_path)}" data-name="${escapeHtml(f.file_name)}">
-                        <span>${knownSet.has(f.file_name) ? "✅" : "⬜"}</span>
+                ${files.map(f => {
+                    const icon = knownSet.has(f.file_name) ? "✅" : deletedSet.has(f.file_name) ? "❌" : "⬜";
+                    const hint = deletedSet.has(f.file_name) ? ' title="此前已删除，可重新导入"' : "";
+                    return `<div class="bsai-pp-import-item" data-path="${escapeHtml(f.file_path)}" data-name="${escapeHtml(f.file_name)}"${hint}>
+                        <span>${icon}</span>
                         <span>${escapeHtml(f.file_name)}</span>
                         <span class="size">${(f.size / 1024 / 1024).toFixed(1)} MB</span>
-                    </div>
-                `).join("")}
+                    </div>`;
+                }).join("")}
             </div>
             <div style="display:flex;gap:8px;justify-content:flex-end;">
                 <button class="bsai-pp-btn" data-cancel>取消</button>
@@ -1604,6 +2165,11 @@ class TimelineEditor {
         if (clip.linked_id) {
             const linked = this.td.clips.find(c => c.id === clip.linked_id);
             if (linked) linked.linked_id = null;
+        }
+        // Track deleted file to prevent auto-reimport
+        if (!this.td.deleted_files) this.td.deleted_files = [];
+        if (!this.td.deleted_files.includes(clip.file_name)) {
+            this.td.deleted_files.push(clip.file_name);
         }
         this.td.clips.splice(index, 1);
         if (this.selectedIndex >= this.td.clips.length) this.selectedIndex = this.td.clips.length - 1;
@@ -1844,12 +2410,12 @@ function _registerBsaiPP() {
         function _initTdProperty(node) {
             if (!node.properties) node.properties = {};
             if (!node.properties.bsai_td) {
-                node.properties.bsai_td = '{"clips":[],"known_files":[]}';
+                node.properties.bsai_td = '{"clips":[],"known_files":[],"deleted_files":[],"directory_history":{}}';
             }
         }
 
         function _syncToServer(node) {
-            const json = node.properties?.bsai_td || '{"clips":[],"known_files":[]}';
+            const json = node.properties?.bsai_td || '{"clips":[],"known_files":[],"deleted_files":[],"directory_history":{}}';
             api.fetchApi("/bsai_premiere_pro/timeline_save", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -1908,12 +2474,45 @@ function _registerBsaiPP() {
                     localPos[1] >= btn.y && localPos[1] <= btn.y + btn.h) {
                     if (btn.action === "browse") {
                         const dirWidget = this.widgets?.find(w => w.name === "watch_directory");
-                        browseDirectoryDialog(dirWidget?.value || "").then(selected => {
-                            if (selected) {
+                        const oldDir = dirWidget?.value || "";
+                        browseDirectoryDialog(oldDir).then(selected => {
+                            if (selected && selected !== oldDir) {
+                                // Save/restore directory history
+                                let td;
+                                try { td = JSON.parse(this.properties?.bsai_td || '{}'); } catch { td = {}; }
+                                if (!td.clips) td.clips = [];
+                                if (!td.known_files) td.known_files = [];
+                                if (!td.deleted_files) td.deleted_files = [];
+                                if (!td.directory_history) td.directory_history = {};
+                                if (!td.video_tracks) td.video_tracks = [{ name: "V1", locked: false, visible: true }];
+                                if (!td.audio_tracks) td.audio_tracks = [{ name: "A1", locked: false, muted: false, solo: false }];
+                                // Save current state
+                                if (oldDir) {
+                                    td.directory_history[oldDir] = {
+                                        clips: td.clips, known_files: td.known_files, deleted_files: td.deleted_files,
+                                        video_tracks: td.video_tracks, audio_tracks: td.audio_tracks,
+                                    };
+                                }
+                                // Restore or initialize
+                                const hist = td.directory_history[selected];
+                                if (hist) {
+                                    td.clips = hist.clips || [];
+                                    td.known_files = hist.known_files || [];
+                                    td.deleted_files = hist.deleted_files || [];
+                                    td.video_tracks = hist.video_tracks || [{ name: "V1", locked: false, visible: true }];
+                                    td.audio_tracks = hist.audio_tracks || [{ name: "A1", locked: false, muted: false, solo: false }];
+                                } else {
+                                    td.clips = []; td.known_files = []; td.deleted_files = [];
+                                }
                                 if (dirWidget) dirWidget.value = selected;
+                                this.properties.bsai_td = JSON.stringify(td);
+                                _syncToServer(this);
                                 const importer = importerMap.get(this.id);
                                 if (importer) {
-                                    try { importer.updateNodeTitle(JSON.parse(this.properties?.bsai_td || '{"clips":[]}')); } catch {}
+                                    importer.updateNodeTitle(td);
+                                    if (!hist) setTimeout(() => {
+                                        importer.poll();
+                                    }, 500);
                                 }
                             }
                         });
