@@ -51,7 +51,7 @@ class BSAIPremiereProTimeline:
                 }),
                 "timeline_data": ("STRING", {
                     "default": '{"clips":[],"known_files":[]}',
-                    "multiline": True,
+                    "multiline": False,
                 }),
             },
             "optional": {

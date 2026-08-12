@@ -1803,7 +1803,7 @@ app.registerExtension({
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
 
-            // Hide the timeline_data multiline widget
+            // Hide the timeline_data widget
             const tdWidget = this.widgets?.find(w => w.name === "timeline_data");
             if (tdWidget) {
                 tdWidget.computeSize = () => [0, -4];
@@ -1834,9 +1834,6 @@ app.registerExtension({
                 editor.open();
             });
 
-            // Set a reasonable size
-            this.size = [420, 300];
-
             // Start auto-import polling
             const importer = new AutoImporter(this);
             importerMap.set(this.id, importer);
@@ -1847,6 +1844,21 @@ app.registerExtension({
                 const td = JSON.parse(tdWidget?.value || '{"clips":[]}');
                 importer.updateNodeTitle(td);
             } catch {}
+
+            // Force resize after layout to hide timeline_data widget
+            const self = this;
+            setTimeout(() => {
+                const w = self.widgets?.find(w2 => w2.name === "timeline_data");
+                if (w) {
+                    w.computeSize = () => [0, -4];
+                    w.hidden = true;
+                    w.draw = () => {};
+                    w.mouse = () => {};
+                }
+                const computed = self.computeSize();
+                self.setSize([Math.max(420, computed[0]), computed[1]]);
+                self.setDirtyCanvas(true, true);
+            }, 50);
         };
 
         const onRemoved = nodeType.prototype.onRemoved;
@@ -1873,6 +1885,19 @@ app.registerExtension({
                     } catch {}
                 }
             }
+            const self = this;
+            setTimeout(() => {
+                const w = self.widgets?.find(w2 => w2.name === "timeline_data");
+                if (w) {
+                    w.computeSize = () => [0, -4];
+                    w.hidden = true;
+                    w.draw = () => {};
+                    w.mouse = () => {};
+                }
+                const computed = self.computeSize();
+                self.setSize([Math.max(420, computed[0]), computed[1]]);
+                self.setDirtyCanvas(true, true);
+            }, 50);
             return result;
         };
 
@@ -1897,6 +1922,12 @@ app.registerExtension({
                         if (editor) editor.refresh();
                     }
                 }
+                const self = this;
+                setTimeout(() => {
+                    const computed = self.computeSize();
+                    self.setSize([Math.max(420, computed[0]), computed[1]]);
+                    self.setDirtyCanvas(true, true);
+                }, 50);
             }
             if (message?.merge_msg) {
                 const editor = importerMap.get(this.id)?._editor;
