@@ -315,6 +315,15 @@ const STYLES = `
 }
 `;
 
+// Inject styles immediately so directory browser dialog has CSS
+(function _bsaiInjectStyles() {
+    if (document.getElementById("bsai-pp-styles")) return;
+    const el = document.createElement("style");
+    el.id = "bsai-pp-styles";
+    el.textContent = STYLES;
+    document.head.appendChild(el);
+})();
+
 // ── Standalone directory browser (usable from node button) ──────────
 function browseDirectoryDialog(initialPath) {
     return new Promise((resolve) => {
