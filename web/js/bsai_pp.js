@@ -414,7 +414,7 @@ function browseDirectoryDialog(initialPath) {
             const val = manualInput.value.trim();
             if (val) loadDirs(val);
         };
-        dialog.querySelector("[data-act='go"]').onclick = goToPath;
+        dialog.querySelector("[data-act='go']").onclick = goToPath;
         manualInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); goToPath(); } };
 
         dialog.querySelector("[data-cancel]").onclick = () => {
