@@ -22,8 +22,8 @@ class BSAIPremiereProTimeline:
                     "multiline": False,
                 }),
                 "auto_import": ("BOOLEAN", {"default": True}),
-                "default_transition": (["cut", "fade", "black", "white"], {
-                    "default": "cut",
+                "default_transition": (["fade", "black", "white", "cut"], {
+                    "default": "fade",
                 }),
                 "transition_duration": ("FLOAT", {
                     "default": 0.5, "min": 0.0, "max": 5.0, "step": 0.1,

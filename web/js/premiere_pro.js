@@ -3,8 +3,10 @@ import { api } from "../../../scripts/api.js";
 
 const NODE_TYPE = "BSAIPremiereProTimeline";
 const POLL_INTERVAL = 3000;
-const TRANSITIONS = ["cut", "fade", "black", "white"];
-const TRANSITION_LABELS = { cut: "切镜", fade: "淡入淡出", black: "黑场", white: "白场" };
+const TRANSITIONS = ["fade", "black", "white", "cut"];
+const TRANSITION_LABELS = { cut: "切镜", fade: "淡入淡出", black: "黑屏过渡", white: "白屏过渡" };
+const TRANSITION_ICONS = { cut: "✂️", fade: "🌫️", black: "⬛", white: "⬜" };
+const TRANSITION_DESCS = { cut: "硬切", fade: "平滑过渡", black: "黑屏淡入", white: "白屏淡入" };
 
 function formatTime(seconds) {
     if (!seconds || seconds < 0) return "00:00.00";
@@ -128,10 +130,32 @@ const STYLES = `
     font-weight: 600;
 }
 .bsai-pp-transition-arrow {
-    display: flex; align-items: center; justify-content: center;
-    min-width: 40px; height: 120px; color: #666; font-size: 10px;
-    writing-mode: vertical-rl; text-orientation: mixed;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-width: 48px; height: 120px; cursor: pointer; color: #888; font-size: 10px;
+    border-radius: 6px; transition: background 0.2s, color 0.2s; position: relative;
+    user-select: none; gap: 4px; flex-shrink: 0;
 }
+.bsai-pp-transition-arrow:hover { background: #333; color: #ddd; }
+.bsai-pp-transition-arrow .arrow-icon { font-size: 18px; writing-mode: horizontal-tb; }
+.bsai-pp-transition-arrow .arrow-label { writing-mode: vertical-rl; text-orientation: mixed; }
+.bsai-pp-transition-popup {
+    position: fixed; z-index: 100010; background: #2a2a2a; border: 1px solid #555;
+    border-radius: 8px; padding: 8px; min-width: 160px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+}
+.bsai-pp-transition-popup .popup-title {
+    color: #888; font-size: 10px; padding: 4px 8px 8px; text-transform: uppercase;
+    letter-spacing: 1px; border-bottom: 1px solid #3a3a3a; margin-bottom: 4px;
+}
+.bsai-pp-transition-option {
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+    border-radius: 4px; cursor: pointer; color: #ccc; font-size: 12px;
+    white-space: nowrap; transition: background 0.15s;
+}
+.bsai-pp-transition-option:hover { background: #3a3a3a; }
+.bsai-pp-transition-option.selected { background: #4a90d9; color: #fff; }
+.bsai-pp-transition-option .opt-icon { font-size: 16px; width: 20px; text-align: center; }
+.bsai-pp-transition-option .opt-desc { color: #666; font-size: 10px; margin-left: auto; }
 .bsai-pp-empty-timeline {
     color: #555; font-size: 13px; padding: 40px; text-align: center;
     width: 100%;
@@ -296,8 +320,8 @@ class AutoImporter {
                     has_audio: meta.has_audio || false,
                     trim_start: 0,
                     trim_end: meta.duration || 0,
-                    transition_in: "cut",
-                    transition_out: "cut",
+                    transition_in: "fade",
+                    transition_out: "fade",
                     transition_duration: 0.5,
                     audio_replacement: null,
                     audio_fade_in: 0,
@@ -482,7 +506,12 @@ class TimelineEditor {
             if (i > 0) {
                 const arrow = document.createElement("div");
                 arrow.className = "bsai-pp-transition-arrow";
-                arrow.textContent = TRANSITION_LABELS[clip.transition_in] || "切镜";
+                const transIn = clip.transition_in || "fade";
+                arrow.innerHTML = `
+                    <span class="arrow-icon">${TRANSITION_ICONS[transIn] || "🌫️"}</span>
+                    <span class="arrow-label">${TRANSITION_LABELS[transIn] || "淡入淡出"}</span>`;
+                arrow.title = `点击切换过渡效果 (当前: ${TRANSITION_LABELS[transIn] || "淡入淡出"})`;
+                arrow.onclick = (e) => { e.stopPropagation(); this._showTransitionPopup(arrow, i); };
                 track.appendChild(arrow);
             }
             track.appendChild(this._createClipBlock(clip, i));
@@ -511,6 +540,54 @@ class TimelineEditor {
             <span class="bsai-pp-clip-num">${index + 1}</span>`;
         block.onclick = () => { this.selectedIndex = index; this._renderAll(); };
         return block;
+    }
+
+    _showTransitionPopup(anchor, clipIndex) {
+        document.querySelectorAll(".bsai-pp-transition-popup").forEach(p => p.remove());
+        const clip = this.td.clips[clipIndex];
+        if (!clip) return;
+        const currentTrans = clip.transition_in || "fade";
+        const popup = document.createElement("div");
+        popup.className = "bsai-pp-transition-popup";
+        popup.innerHTML = `
+            <div class="popup-title">切换过渡效果</div>
+            ${TRANSITIONS.map(t => `
+                <div class="bsai-pp-transition-option ${t === currentTrans ? "selected" : ""}" data-trans="${t}">
+                    <span class="opt-icon">${TRANSITION_ICONS[t]}</span>
+                    <span>${TRANSITION_LABELS[t]}</span>
+                    <span class="opt-desc">${TRANSITION_DESCS[t]}</span>
+                </div>
+            `).join("")}`;
+        document.body.appendChild(popup);
+        const rect = anchor.getBoundingClientRect();
+        const popupRect = popup.getBoundingClientRect();
+        let left = rect.left + rect.width / 2 - popupRect.width / 2;
+        let top = rect.bottom + 6;
+        if (left < 8) left = 8;
+        if (left + popupRect.width > window.innerWidth - 8) left = window.innerWidth - popupRect.width - 8;
+        if (top + popupRect.height > window.innerHeight - 8) top = rect.top - popupRect.height - 6;
+        popup.style.left = left + "px";
+        popup.style.top = top + "px";
+        popup.querySelectorAll(".bsai-pp-transition-option").forEach(opt => {
+            opt.onclick = (e) => {
+                e.stopPropagation();
+                const newTrans = opt.getAttribute("data-trans");
+                clip.transition_in = newTrans;
+                if (clipIndex > 0) {
+                    const prevClip = this.td.clips[clipIndex - 1];
+                    if (prevClip) prevClip.transition_out = newTrans;
+                }
+                this._save();
+                this._renderTimeline();
+                this._renderEditPanel();
+                popup.remove();
+                this._toast(`过渡效果已切换为: ${TRANSITION_LABELS[newTrans]}`, "success");
+            };
+        });
+        const closeHandler = (e) => {
+            if (!popup.contains(e.target)) { popup.remove(); document.removeEventListener("mousedown", closeHandler); }
+        };
+        setTimeout(() => document.addEventListener("mousedown", closeHandler), 10);
     }
 
     async _loadThumbnails() {
@@ -551,8 +628,8 @@ class TimelineEditor {
         const dur = clip.duration || 0;
         const trimStart = clip.trim_start || 0;
         const trimEnd = clip.trim_end || dur;
-        const transIn = clip.transition_in || "cut";
-        const transOut = clip.transition_out || "cut";
+        const transIn = clip.transition_in || "fade";
+        const transOut = clip.transition_out || "fade";
         const transDur = clip.transition_duration ?? 0.5;
         const audioRep = clip.audio_replacement || "";
         const aFadeIn = clip.audio_fade_in || 0;
@@ -727,8 +804,8 @@ class TimelineEditor {
                 has_audio: meta.has_audio || false,
                 trim_start: 0,
                 trim_end: meta.duration || 0,
-                transition_in: "cut",
-                transition_out: "cut",
+                transition_in: "fade",
+                transition_out: "fade",
                 transition_duration: parseFloat(this._getWidgetValue("transition_duration", 0.5)),
                 audio_replacement: null,
                 audio_fade_in: 0,
@@ -954,7 +1031,7 @@ class TimelineEditor {
                 output_format: this._getWidgetValue("output_format", "mp4"),
                 video_codec: this._getWidgetValue("video_codec", "libx264"),
                 quality: this._getWidgetValue("quality", "high"),
-                default_transition: this._getWidgetValue("default_transition", "cut"),
+                default_transition: this._getWidgetValue("default_transition", "fade"),
                 transition_duration: parseFloat(this._getWidgetValue("transition_duration", 0.5)),
             };
             this._updateProgress(30, "合并视频片段...");
