@@ -1800,20 +1800,6 @@ app.registerExtension({
     async beforeRegisterNodeDef(nodeType, nodeData, appInstance) {
         if (nodeData.name !== NODE_TYPE) return;
 
-        function _hideTdWidget(node) {
-            if (!node.widgets) return;
-            const w = node.widgets.find(w2 => w2.name === "timeline_data");
-            if (w) {
-                w.computeSize = () => [0, 0];
-                w.hidden = true;
-                w.draw = function() {};
-                w.mouse = function() {};
-                if (!w.value || w.value === "") {
-                    w.value = '{"clips":[],"known_files":[]}';
-                }
-            }
-        }
-
         function _ensureButtons(node) {
             if (!node.widgets) node.widgets = [];
             const hasBrowse = node.widgets.some(w => w.name === "browse_directory");
@@ -1841,26 +1827,55 @@ app.registerExtension({
             }
         }
 
+        function _initTdValue(node) {
+            const w = node.widgets?.find(w2 => w2.name === "timeline_data");
+            if (w && (!w.value || w.value === "")) {
+                w.value = '{"clips":[],"known_files":[]}';
+            }
+        }
+
+        // Override computeSize to exclude timeline_data from node sizing
+        const originalComputeSize = nodeType.prototype.computeSize;
+        nodeType.prototype.computeSize = function () {
+            if (!this.widgets) return originalComputeSize.apply(this, arguments);
+            const idx = this.widgets.findIndex(w => w.name === "timeline_data");
+            if (idx < 0) return originalComputeSize.apply(this, arguments);
+            const td = this.widgets.splice(idx, 1)[0];
+            try {
+                return originalComputeSize.apply(this, arguments);
+            } finally {
+                this.widgets.push(td);
+            }
+        };
+
+        // Override drawNodeWidgets to skip timeline_data during rendering
+        const originalDrawWidgets = nodeType.prototype.drawNodeWidgets;
+        nodeType.prototype.drawNodeWidgets = function (ctx) {
+            if (!this.widgets) return originalDrawWidgets?.apply(this, arguments);
+            _ensureButtons(this);
+            const idx = this.widgets.findIndex(w => w.name === "timeline_data");
+            if (idx < 0) return originalDrawWidgets?.apply(this, arguments);
+            const td = this.widgets.splice(idx, 1)[0];
+            try {
+                return originalDrawWidgets?.apply(this, arguments);
+            } finally {
+                this.widgets.push(td);
+            }
+        };
+
         function _forceResize(node) {
             requestAnimationFrame(() => {
-                _hideTdWidget(node);
                 _ensureButtons(node);
                 const computed = node.computeSize();
                 node.setSize([Math.max(420, computed[0]), Math.max(computed[1], 260)]);
                 node.setDirtyCanvas(true, true);
-                requestAnimationFrame(() => {
-                    _hideTdWidget(node);
-                    const c2 = node.computeSize();
-                    node.setSize([Math.max(420, c2[0]), Math.max(c2[1], 260)]);
-                    node.setDirtyCanvas(true, true);
-                });
             });
         }
 
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
-            _hideTdWidget(this);
+            _initTdValue(this);
             _ensureButtons(this);
             const importer = new AutoImporter(this);
             importerMap.set(this.id, importer);
@@ -1889,7 +1904,7 @@ app.registerExtension({
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function () {
             const result = onConfigure?.apply(this, arguments);
-            _hideTdWidget(this);
+            _initTdValue(this);
             _ensureButtons(this);
             const importer = importerMap.get(this.id);
             if (!importer) {
@@ -1915,7 +1930,6 @@ app.registerExtension({
                 if (tdWidget) {
                     tdWidget.value = message.timeline_data;
                 }
-                _hideTdWidget(this);
                 const importer = importerMap.get(this.id);
                 if (importer) {
                     try {
