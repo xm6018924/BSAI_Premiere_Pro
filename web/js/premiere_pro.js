@@ -146,6 +146,8 @@ const STYLES = `
 .bsai-pp-clip-block.linked { border-left-color: #ffa726; }
 .bsai-pp-clip-block:hover { border-color: #6a8aaa; }
 .bsai-pp-clip-block.selected { border-color: #4a90d9; box-shadow: 0 0 8px rgba(74,144,217,0.5); }
+.bsai-pp-clip-block.batch-selected { border-color: #ff6b6b; box-shadow: 0 0 8px rgba(255,107,107,0.6); background: rgba(255,107,107,0.12); }
+.bsai-pp-clip-block.batch-selected::after { content: "✓"; position: absolute; top: 2px; right: 4px; color: #ff6b6b; font-weight: bold; font-size: 12px; }
 .bsai-pp-clip-block.disabled { opacity: 0.4; }
 .bsai-pp-clip-thumb {
     flex: 1; background: #111; display: flex; align-items: center;
@@ -257,6 +259,12 @@ const STYLES = `
     flex-shrink: 0;
 }
 .bsai-pp-footer-info { color: #888; font-size: 12px; }
+.bsai-pp-batch-bar {
+    padding: 8px 16px; background: #2a1a1a; border-top: 1px solid #5a3a3a;
+    display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+}
+.bsai-pp-batch-info { color: #ccc; font-size: 13px; margin-right: auto; }
+.bsai-pp-batch-info strong { color: #ff6b6b; }
 .bsai-pp-toast {
     position: fixed; bottom: 30px; right: 30px; padding: 12px 20px;
     border-radius: 6px; color: #fff; font-size: 13px; z-index: 100001;
@@ -478,6 +486,8 @@ class TimelineEditor {
         this.node = node;
         this.modal = null;
         this.selectedIndex = -1;
+        this.batchMode = false;
+        this.batchSelected = new Set();
         this.thumbCache = new Map();
         this.td = this._load();
     }
@@ -558,6 +568,8 @@ class TimelineEditor {
     }
 
     close() {
+        this.batchMode = false;
+        this.batchSelected.clear();
         this._save();
         const importer = importerMap.get(this.node.id);
         if (importer) importer.setEditor(null);
@@ -600,6 +612,7 @@ class TimelineEditor {
                     <button class="bsai-pp-btn" data-act="add-vtrack">＋ 视频轨道</button>
                     <button class="bsai-pp-btn" data-act="add-atrack">＋ 音频轨道</button>
                     <button class="bsai-pp-btn bsai-pp-btn-danger" data-act="clear-all">🗑 清空全部</button>
+                    <button class="bsai-pp-btn" data-act="batch-select" id="bsai-pp-batch-btn">☑ 批量选择</button>
                     <div class="bsai-pp-status">
                         <span><span class="dot ${this._getWidgetValue("auto_import", true) ? "on" : "off"}" data-dot></span> ${this._getWidgetValue("auto_import", true) ? "监控中" : "已停止"}</span>
                     </div>
@@ -647,6 +660,7 @@ class TimelineEditor {
         this.modal.querySelector('[data-act="add-vtrack"]').onclick = () => this._addVideoTrack();
         this.modal.querySelector('[data-act="add-atrack"]').onclick = () => this._addAudioTrack();
         this.modal.querySelector('[data-act="clear-all"]').onclick = () => this._clearAllClips();
+        this.modal.querySelector('[data-act="batch-select"]').onclick = () => this._toggleBatchMode();
         this.modal.querySelector('[data-act="render"]').onclick = () => this._renderVideo();
         this.modal.addEventListener("keydown", (e) => { if (e.key === "Escape") this.close(); });
     }
@@ -909,6 +923,105 @@ class TimelineEditor {
         };
     }
 
+    _toggleBatchMode() {
+        this.batchMode = !this.batchMode;
+        if (!this.batchMode) {
+            this.batchSelected.clear();
+            this._removeBatchBar();
+        }
+        const btn = this.modal.querySelector("#bsai-pp-batch-btn");
+        if (btn) {
+            btn.textContent = this.batchMode ? "✕ 退出批量" : "☑ 批量选择";
+            btn.classList.toggle("bsai-pp-btn-danger", this.batchMode);
+        }
+        this._renderTimeline();
+        if (this.batchMode) this._renderBatchBar();
+    }
+
+    _renderBatchBar() {
+        if (!this.batchMode) return;
+        let bar = this.modal.querySelector("#bsai-pp-batch-bar");
+        if (!bar) {
+            bar = document.createElement("div");
+            bar.id = "bsai-pp-batch-bar";
+            bar.className = "bsai-pp-batch-bar";
+            this.modal.querySelector(".bsai-pp-modal").insertBefore(
+                bar, this.modal.querySelector(".bsai-pp-footer")
+            );
+        }
+        const count = this.batchSelected.size;
+        const total = (this.td.clips || []).length;
+        bar.innerHTML = `
+            <span class="bsai-pp-batch-info">已选 <strong>${count}</strong> / ${total} 个片段</span>
+            <button class="bsai-pp-btn" data-batch-act="select-all">${count === total ? "取消全选" : "全选"}</button>
+            <button class="bsai-pp-btn bsai-pp-btn-danger" data-batch-act="delete" ${count === 0 ? "disabled" : ""}>🗑 删除选中 (${count})</button>
+            <button class="bsai-pp-btn" data-batch-act="exit">退出批量</button>`;
+        bar.querySelector('[data-batch-act="select-all"]').onclick = () => {
+            if (this.batchSelected.size === total) {
+                this.batchSelected.clear();
+            } else {
+                for (let i = 0; i < total; i++) this.batchSelected.add(i);
+            }
+            this._renderTimeline();
+            this._renderBatchBar();
+        };
+        bar.querySelector('[data-batch-act="delete"]').onclick = () => this._deleteBatchClips();
+        bar.querySelector('[data-batch-act="exit"]').onclick = () => this._toggleBatchMode();
+    }
+
+    _removeBatchBar() {
+        const bar = this.modal.querySelector("#bsai-pp-batch-bar");
+        if (bar) bar.remove();
+    }
+
+    _deleteBatchClips() {
+        if (this.batchSelected.size === 0) { this._toast("未选中任何片段", "info"); return; }
+        const indices = [...this.batchSelected].sort((a, b) => b - a);
+        const overlay = document.createElement("div");
+        overlay.className = "bsai-pp-dialog-overlay";
+        const dialog = document.createElement("div");
+        dialog.className = "bsai-pp-import-dialog";
+        dialog.style.minWidth = "380px";
+        const sampleNames = indices.slice(0, 5).map(i => this.td.clips[i]?.file_name || "").filter(Boolean);
+        dialog.innerHTML = `
+            <h3>🗑 批量删除确认</h3>
+            <div style="color:#ccc;font-size:13px;padding:10px 0;">
+                确认删除选中的 <strong style="color:#ff6b6b;">${indices.length}</strong> 个片段？<br>
+                ${sampleNames.length > 0 ? `<div style="margin-top:8px;color:#888;font-size:12px;">${sampleNames.map(n => `• ${escapeHtml(n)}`).join("<br>")}${indices.length > 5 ? `<br>...等 ${indices.length} 个` : ""}</div>` : ""}
+                <div style="margin-top:8px;color:#ff9800;font-size:12px;">关联的音视频片段将一并删除</div>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="bsai-pp-btn" data-cancel>取消</button>
+                <button class="bsai-pp-btn bsai-pp-btn-danger" data-confirm>确认删除</button>
+            </div>`;
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+        dialog.querySelector("[data-cancel]").onclick = () => overlay.remove();
+        dialog.querySelector("[data-confirm]").onclick = () => {
+            const clipIdsToDelete = new Set();
+            for (const idx of indices) {
+                const clip = this.td.clips[idx];
+                if (!clip) continue;
+                clipIdsToDelete.add(clip.id);
+                if (clip.linked_id) clipIdsToDelete.add(clip.linked_id);
+            }
+            const fileNamesToDelete = new Set();
+            for (const idx of indices) {
+                const clip = this.td.clips[idx];
+                if (clip) fileNamesToDelete.add(clip.file_name);
+            }
+            this.td.clips = this.td.clips.filter(c => !clipIdsToDelete.has(c.id));
+            this.td.known_files = (this.td.known_files || []).filter(f => !fileNamesToDelete.has(f));
+            this.batchSelected.clear();
+            this.selectedIndex = -1;
+            this._save();
+            this._renderAll();
+            this._renderBatchBar();
+            overlay.remove();
+            this._toast(`已删除 ${clipIdsToDelete.size} 个片段`, "success");
+        };
+    }
+
     _clearAllClips() {
         const clips = this.td.clips || [];
         if (clips.length === 0) { this._toast("时间轴上没有片段", "info"); return; }
@@ -952,6 +1065,7 @@ class TimelineEditor {
         block.classList.add(isVideo ? "video-clip" : "audio-clip");
         if (clip.linked_id) block.classList.add("linked");
         if (clipIndex === this.selectedIndex) block.classList.add("selected");
+        if (this.batchMode && this.batchSelected.has(clipIndex)) block.classList.add("batch-selected");
         if (!clip.video_enabled && !clip.audio_enabled) block.classList.add("disabled");
         const clipDur = (clip.trim_end || clip.duration || 0) - (clip.trim_start || 0);
         const pps = this._pps || 15;
@@ -983,7 +1097,20 @@ class TimelineEditor {
                 <div class="bsai-pp-clip-name" title="${escapeHtml(clip.file_name)}">${escapeHtml(clip.file_name)}</div>
                 <div class="bsai-pp-clip-dur">${durLabel}</div>
             </div>`;
-        block.onclick = () => { this.selectedIndex = clipIndex; this._renderAll(); };
+        if (this.batchMode) {
+            block.onclick = (e) => {
+                e.stopPropagation();
+                if (this.batchSelected.has(clipIndex)) {
+                    this.batchSelected.delete(clipIndex);
+                } else {
+                    this.batchSelected.add(clipIndex);
+                }
+                this._renderTimeline();
+                this._renderBatchBar();
+            };
+        } else {
+            block.onclick = () => { this.selectedIndex = clipIndex; this._renderAll(); };
+        }
         return block;
     }
 
