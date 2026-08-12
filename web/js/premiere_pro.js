@@ -1811,81 +1811,10 @@ app.registerExtension({
     async beforeRegisterNodeDef(nodeType, nodeData, appInstance) {
         if (nodeData.name !== NODE_TYPE) return;
 
-        function _ensureButtons(node) {
-            if (!node.widgets) node.widgets = [];
-
-            if (!node.widgets.some(w => w.name === "browse_directory")) {
-                const w = {
-                    name: "browse_directory",
-                    type: "button",
-                    value: "📂 浏览监视目录",
-                    options: { default: "📂 浏览监视目录" },
-                    y: 0, width: 0, last_y: 0,
-                    callback: () => {
-                        const dirWidget = node.widgets?.find(ww => ww.name === "watch_directory");
-                        browseDirectoryDialog(dirWidget?.value || "").then(selected => {
-                            if (selected) {
-                                if (dirWidget) dirWidget.value = selected;
-                                const importer = importerMap.get(node.id);
-                                if (importer) {
-                                    try { importer.updateNodeTitle(JSON.parse(node.properties?.bsai_td || '{"clips":[]}')); } catch {}
-                                }
-                            }
-                        });
-                    },
-                    mouse: function (e, pos, n) { this.callback(); return true; },
-                    computeSize: function (width) { return [width, 28]; },
-                    serializeValue: () => undefined,
-                    draw: function (ctx, n, width, y, height) {
-                        this.y = y; this.width = width;
-                        const margin = 10, w = width - margin * 2, h = 24;
-                        ctx.fillStyle = "#3a3a3a";
-                        ctx.beginPath();
-                        if (ctx.roundRect) ctx.roundRect(margin, y + 2, w, h, 4);
-                        else ctx.rect(margin, y + 2, w, h);
-                        ctx.fill();
-                        ctx.fillStyle = "#ddd";
-                        ctx.font = "12px sans-serif";
-                        ctx.textAlign = "center";
-                        ctx.textBaseline = "middle";
-                        ctx.fillText(this.value, margin + w / 2, y + 2 + h / 2);
-                    },
-                };
-                node.widgets.push(w);
-            }
-
-            if (!node.widgets.some(w => w.name === "open_editor")) {
-                const w = {
-                    name: "open_editor",
-                    type: "button",
-                    value: "🎬 打开时间轴编辑器",
-                    options: { default: "🎬 打开时间轴编辑器" },
-                    y: 0, width: 0, last_y: 0,
-                    callback: () => {
-                        const editor = new TimelineEditor(node);
-                        editor.open();
-                    },
-                    mouse: function (e, pos, n) { this.callback(); return true; },
-                    computeSize: function (width) { return [width, 28]; },
-                    serializeValue: () => undefined,
-                    draw: function (ctx, n, width, y, height) {
-                        this.y = y; this.width = width;
-                        const margin = 10, w = width - margin * 2, h = 24;
-                        ctx.fillStyle = "#3a3a3a";
-                        ctx.beginPath();
-                        if (ctx.roundRect) ctx.roundRect(margin, y + 2, w, h, 4);
-                        else ctx.rect(margin, y + 2, w, h);
-                        ctx.fill();
-                        ctx.fillStyle = "#ddd";
-                        ctx.font = "12px sans-serif";
-                        ctx.textAlign = "center";
-                        ctx.textBaseline = "middle";
-                        ctx.fillText(this.value, margin + w / 2, y + 2 + h / 2);
-                    },
-                };
-                node.widgets.push(w);
-            }
-        }
+        const BTN_H = 26;
+        const BTN_GAP = 4;
+        const BTN_MARGIN = 10;
+        const BTN_EXTRA = BTN_H * 2 + BTN_GAP + BTN_MARGIN;
 
         function _initTdProperty(node) {
             if (!node.properties) node.properties = {};
@@ -1905,18 +1834,86 @@ app.registerExtension({
 
         function _forceResize(node) {
             requestAnimationFrame(() => {
-                _ensureButtons(node);
                 const computed = node.computeSize();
                 node.setSize([Math.max(420, computed[0]), Math.max(computed[1], 260)]);
                 node.setDirtyCanvas(true, true);
             });
         }
 
+        // ── Draw buttons on canvas via onDrawForeground ──
+        const oldDrawFg = nodeType.prototype.onDrawForeground;
+        nodeType.prototype.onDrawForeground = function (ctx) {
+            oldDrawFg?.apply(this, arguments);
+            if (this.flags?.collapsed) return;
+
+            const w = this.size[0] - BTN_MARGIN * 2;
+            const browseY = this.size[1] - BTN_EXTRA;
+            const editorY = browseY + BTN_H + BTN_GAP;
+
+            this._bsaiBtns = [
+                { x: BTN_MARGIN, y: browseY, w: w, h: BTN_H, action: "browse" },
+                { x: BTN_MARGIN, y: editorY, w: w, h: BTN_H, action: "editor" },
+            ];
+
+            for (const btn of this._bsaiBtns) {
+                ctx.fillStyle = "#3a3a3a";
+                ctx.beginPath();
+                if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 5);
+                else ctx.rect(btn.x, btn.y, btn.w, btn.h);
+                ctx.fill();
+
+                ctx.fillStyle = "#ddd";
+                ctx.font = "13px sans-serif";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                const label = btn.action === "browse" ? "📂 浏览监视目录" : "🎬 打开时间轴编辑器";
+                ctx.fillText(label, btn.x + btn.w / 2, btn.y + btn.h / 2);
+            }
+        };
+
+        // ── Handle button clicks via onMouseDown ──
+        const oldMouseDown = nodeType.prototype.onMouseDown;
+        nodeType.prototype.onMouseDown = function (e, localPos, canvas) {
+            const r = oldMouseDown?.apply(this, arguments);
+            if (r) return r;
+            if (!this._bsaiBtns) return r;
+
+            for (const btn of this._bsaiBtns) {
+                if (localPos[0] >= btn.x && localPos[0] <= btn.x + btn.w &&
+                    localPos[1] >= btn.y && localPos[1] <= btn.y + btn.h) {
+                    if (btn.action === "browse") {
+                        const dirWidget = this.widgets?.find(w => w.name === "watch_directory");
+                        browseDirectoryDialog(dirWidget?.value || "").then(selected => {
+                            if (selected) {
+                                if (dirWidget) dirWidget.value = selected;
+                                const importer = importerMap.get(this.id);
+                                if (importer) {
+                                    try { importer.updateNodeTitle(JSON.parse(this.properties?.bsai_td || '{"clips":[]}')); } catch {}
+                                }
+                            }
+                        });
+                    } else if (btn.action === "editor") {
+                        const editor = new TimelineEditor(this);
+                        editor.open();
+                    }
+                    return true;
+                }
+            }
+            return r;
+        };
+
+        // ── Add height for buttons via computeSize ──
+        const oldComputeSize = nodeType.prototype.computeSize;
+        nodeType.prototype.computeSize = function () {
+            const size = oldComputeSize.apply(this, arguments);
+            size[1] += BTN_EXTRA;
+            return size;
+        };
+
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
             _initTdProperty(this);
-            _ensureButtons(this);
             _syncToServer(this);
             const importer = new AutoImporter(this);
             importerMap.set(this.id, importer);
@@ -1930,7 +1927,6 @@ app.registerExtension({
         const onAdded = nodeType.prototype.onAdded;
         nodeType.prototype.onAdded = function () {
             onAdded?.apply(this, arguments);
-            _ensureButtons(this);
             _forceResize(this);
         };
 
@@ -1953,7 +1949,6 @@ app.registerExtension({
                     }
                 }
             }
-            _ensureButtons(this);
             _syncToServer(this);
             const importer = importerMap.get(this.id);
             if (!importer) {
