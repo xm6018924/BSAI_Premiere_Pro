@@ -530,13 +530,15 @@ class TimelineEditor {
                     <label>自动导入</label>
                     <input type="checkbox" data-act="auto-import" ${this._getWidgetValue("auto_import", true) ? "checked" : ""}>
                     <label>监视目录</label>
-                    <input type="text" data-act="dir" value="${escapeHtml(this._getWidgetValue("watch_directory", "output"))}">
+                    <input type="text" data-act="dir" value="${escapeHtml(this._getWidgetValue("watch_directory", "output"))}" style="width:120px;">
+                    <button class="bsai-pp-btn" data-act="browse-dir">📁 浏览</button>
                     <label>仅带音频</label>
                     <input type="checkbox" data-act="filter-audio" ${this.td.filter_audio_only !== false ? "checked" : ""}>
                     <button class="bsai-pp-btn" data-act="scan">🔍 扫描</button>
                     <button class="bsai-pp-btn" data-act="manual-import">📥 手动导入</button>
                     <button class="bsai-pp-btn" data-act="add-vtrack">＋ 视频轨道</button>
                     <button class="bsai-pp-btn" data-act="add-atrack">＋ 音频轨道</button>
+                    <button class="bsai-pp-btn bsai-pp-btn-danger" data-act="clear-all">🗑 清空全部</button>
                     <div class="bsai-pp-status">
                         <span><span class="dot ${this._getWidgetValue("auto_import", true) ? "on" : "off"}" data-dot></span> ${this._getWidgetValue("auto_import", true) ? "监控中" : "已停止"}</span>
                     </div>
@@ -580,8 +582,10 @@ class TimelineEditor {
         };
         this.modal.querySelector('[data-act="scan"]').onclick = () => this._scanNow();
         this.modal.querySelector('[data-act="manual-import"]').onclick = () => this._manualImport();
+        this.modal.querySelector('[data-act="browse-dir"]').onclick = () => this._browseDirectory();
         this.modal.querySelector('[data-act="add-vtrack"]').onclick = () => this._addVideoTrack();
         this.modal.querySelector('[data-act="add-atrack"]').onclick = () => this._addAudioTrack();
+        this.modal.querySelector('[data-act="clear-all"]').onclick = () => this._clearAllClips();
         this.modal.querySelector('[data-act="render"]').onclick = () => this._renderVideo();
         this.modal.addEventListener("keydown", (e) => { if (e.key === "Escape") this.close(); });
     }
@@ -736,10 +740,23 @@ class TimelineEditor {
         } else if (action === "solo" && trackType === "audio") {
             track.solo = !track.solo;
         } else if (action === "remove") {
-            if (this._getClipsForTrack(trackType, trackIndex).length > 0) { this._toast("轨道上有片段，无法删除", "error"); return; }
             if (tracks.length <= 1) { this._toast("至少保留一个轨道", "info"); return; }
+            const trackClips = this._getClipsForTrack(trackType, trackIndex);
+            if (trackClips.length > 0) {
+                for (const clip of trackClips) {
+                    if (clip.linked_id) {
+                        const linked = this.td.clips.find(c => c.id === clip.linked_id);
+                        if (linked) linked.linked_id = null;
+                    }
+                    const idx = this.td.clips.indexOf(clip);
+                    if (idx >= 0) this.td.clips.splice(idx, 1);
+                }
+            }
+            for (const c of this.td.clips) {
+                if (c.track_type === trackType && c.track_index > trackIndex) c.track_index--;
+            }
             tracks.splice(trackIndex, 1);
-            this._toast(`已删除轨道 ${track.name}`, "success");
+            this._toast(`已删除轨道 ${track.name} (${trackClips.length}个片段)`, "success");
         }
         this._save();
         this._renderTimeline();
@@ -761,6 +778,109 @@ class TimelineEditor {
         this._save();
         this._renderTimeline();
         this._toast(`已添加音频轨道 A${idx + 1}`, "success");
+    }
+
+    async _browseDirectory() {
+        const overlay = document.createElement("div");
+        overlay.className = "bsai-pp-dialog-overlay";
+        const dialog = document.createElement("div");
+        dialog.className = "bsai-pp-import-dialog";
+        dialog.style.minWidth = "500px";
+        dialog.innerHTML = `
+            <h3>📁 选择监视目录</h3>
+            <div style="display:flex;gap:6px;margin-bottom:10px;">
+                <button class="bsai-pp-btn" data-act="up">⬆ 上级</button>
+                <input type="text" data-path-input style="flex:1;background:#1a1a1a;border:1px solid #444;color:#e0e0e0;padding:4px 8px;border-radius:4px;font-size:12px;" readonly>
+            </div>
+            <div class="bsai-pp-import-list" data-dir-list style="max-height:350px;"></div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="bsai-pp-btn" data-cancel>取消</button>
+                <button class="bsai-pp-btn bsai-pp-btn-primary" data-select>选择此目录</button>
+            </div>`;
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+
+        let currentPath = "";
+
+        const loadDirs = async (path) => {
+            const listEl = dialog.querySelector("[data-dir-list]");
+            const pathEl = dialog.querySelector("[data-path-input]");
+            listEl.innerHTML = `<div style="color:#666;padding:10px;">加载中...</div>`;
+            try {
+                const resp = await api.fetchApi(`/bsai_premiere_pro/browse?path=${encodeURIComponent(path)}`);
+                const data = await resp.json();
+                if (data.error) { listEl.innerHTML = `<div style="color:#d35454;padding:10px;">${data.error}</div>`; return; }
+                currentPath = data.path;
+                pathEl.value = currentPath;
+                listEl.innerHTML = "";
+                if (data.dirs.length === 0) {
+                    listEl.innerHTML = `<div style="color:#666;padding:10px;">没有子目录</div>`;
+                }
+                for (const dir of data.dirs) {
+                    const item = document.createElement("div");
+                    item.className = "bsai-pp-import-item";
+                    item.innerHTML = `<span>📁</span><span>${escapeHtml(dir)}</span>`;
+                    item.onclick = () => loadDirs(data.path + (data.path.endsWith("\\") || data.path.endsWith("/") ? "" : "\\") + dir);
+                    listEl.appendChild(item);
+                }
+            } catch (e) {
+                listEl.innerHTML = `<div style="color:#d35454;padding:10px;">加载失败: ${e.message}</div>`;
+            }
+        };
+
+        loadDirs("");
+        dialog.querySelector("[data-act='up']").onclick = async () => {
+            const resp = await api.fetchApi(`/bsai_premiere_pro/browse?path=${encodeURIComponent(currentPath)}`);
+            const data = await resp.json();
+            if (data.parent !== undefined) loadDirs(data.parent);
+        };
+        dialog.querySelector("[data-cancel]").onclick = () => overlay.remove();
+        dialog.querySelector("[data-select]").onclick = () => {
+            const dirInput = this.modal.querySelector('[data-act="dir"]');
+            if (dirInput && currentPath) {
+                dirInput.value = currentPath;
+                const w = this._getWidget("watch_directory");
+                if (w) w.value = currentPath;
+                this._toast(`已选择目录: ${currentPath}`, "success");
+            }
+            overlay.remove();
+        };
+    }
+
+    _clearAllClips() {
+        const clips = this.td.clips || [];
+        if (clips.length === 0) { this._toast("时间轴上没有片段", "info"); return; }
+        const vCount = clips.filter(c => c.track_type === "video").length;
+        const aCount = clips.filter(c => c.track_type === "audio").length;
+        const overlay = document.createElement("div");
+        overlay.className = "bsai-pp-dialog-overlay";
+        const dialog = document.createElement("div");
+        dialog.className = "bsai-pp-import-dialog";
+        dialog.style.minWidth = "380px";
+        dialog.innerHTML = `
+            <h3>🗑 清空全部片段</h3>
+            <div style="color:#ccc;font-size:13px;padding:10px 0;">
+                将删除所有轨道上的全部片段：<br>
+                📹 ${vCount} 个视频片段<br>
+                🎵 ${aCount} 个音频片段<br>
+                <span style="color:#d35454;">此操作不可撤销</span>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="bsai-pp-btn" data-cancel>取消</button>
+                <button class="bsai-pp-btn bsai-pp-btn-danger" data-confirm>确认清空</button>
+            </div>`;
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+        dialog.querySelector("[data-cancel]").onclick = () => overlay.remove();
+        dialog.querySelector("[data-confirm]").onclick = () => {
+            this.td.clips = [];
+            this.td.known_files = [];
+            this.selectedIndex = -1;
+            this._save();
+            this._renderAll();
+            overlay.remove();
+            this._toast("已清空全部片段", "success");
+        };
     }
 
     _createClipBlock(clip, clipIndex) {
@@ -1547,6 +1667,30 @@ app.registerExtension({
                 }
             }
             return result;
+        };
+
+        const onExecuted = nodeType.prototype.onExecuted;
+        nodeType.prototype.onExecuted = function (message) {
+            onExecuted?.apply(this, arguments);
+            if (message?.timeline_data) {
+                const tdWidget = this.widgets?.find(w => w.name === "timeline_data");
+                if (tdWidget) {
+                    tdWidget.value = message.timeline_data;
+                    const importer = importerMap.get(this.id);
+                    if (importer) {
+                        try {
+                            const td = JSON.parse(message.timeline_data);
+                            importer.updateNodeTitle(td);
+                        } catch {}
+                        const editor = importer._editor;
+                        if (editor) editor.refresh();
+                    }
+                }
+            }
+            if (message?.merge_msg) {
+                const editor = importerMap.get(this.id)?._editor;
+                if (editor) editor._toast(message.merge_msg, "info");
+            }
         };
     },
 });

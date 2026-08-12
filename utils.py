@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import time
 import base64
+import wave
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".wmv", ".m4v"}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".wma"}
@@ -83,7 +84,7 @@ def get_video_info(file_path):
             ffprobe, "-v", "quiet", "-print_format", "json",
             "-show_format", "-show_streams", file_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=30)
         if result.returncode != 0:
             return None
         data = json.loads(result.stdout)
@@ -488,7 +489,7 @@ def _process_track_clips(clips, track_type, track_index, temp_dir, target_w, tar
             print(f"[BSAI Premiere Pro] Skipping clip {i} in {track_type} track {track_index}: file not found or invalid")
             continue
         print(f"[BSAI Premiere Pro] Processing {track_type} track {track_index} clip {i+1}/{total_clips}: {clip.get('file_name', 'unknown')}")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
         if result.returncode != 0:
             print(f"[BSAI Premiere Pro] Failed to process clip {i} in {track_type} track {track_index}:\n{result.stderr}")
             continue
@@ -516,7 +517,7 @@ def _process_track_clips(clips, track_type, track_index, temp_dir, target_w, tar
         "-c", "copy",
         merged_file
     ]
-    result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(concat_cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
     if result.returncode != 0:
         print(f"[BSAI Premiere Pro] Stream copy concat failed for {track_type} track {track_index}, re-encoding...")
         concat_cmd = [
@@ -528,7 +529,7 @@ def _process_track_clips(clips, track_type, track_index, temp_dir, target_w, tar
             "-ar", "48000", "-ac", "2",
             merged_file
         ]
-        result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(concat_cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
         if result.returncode != 0:
             print(f"[BSAI Premiere Pro] Failed to merge {track_type} track {track_index}:\n{result.stderr}")
             return None
@@ -572,7 +573,7 @@ def _overlay_video_tracks(track_files, temp_dir, target_w, target_h, target_fps)
     ])
 
     print(f"[BSAI Premiere Pro] Overlaying {len(track_files)} video tracks")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
     if result.returncode != 0:
         print(f"[BSAI Premiere Pro] Failed to overlay video tracks:\n{result.stderr}")
         return None
@@ -609,7 +610,7 @@ def _mix_audio_tracks(track_files, temp_dir):
     ])
 
     print(f"[BSAI Premiere Pro] Mixing {len(track_files)} audio tracks")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
     if result.returncode != 0:
         print(f"[BSAI Premiere Pro] Failed to mix audio tracks:\n{result.stderr}")
         return None
@@ -721,7 +722,7 @@ def _process_legacy(enabled_clips, temp_dir, output_path,
             print(f"[BSAI Premiere Pro] Skipping clip {i}: file not found or invalid")
             continue
         print(f"[BSAI Premiere Pro] Processing clip {i+1}/{len(enabled_clips)}: {clip.get('file_name', 'unknown')}")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
         if result.returncode != 0:
             return None, f"Failed to process clip {i} ({clip.get('file_name', '')}):\n{result.stderr}"
         processed_files.append(output_file)
@@ -744,7 +745,7 @@ def _process_legacy(enabled_clips, temp_dir, output_path,
         output_path
     ]
     print(f"[BSAI Premiere Pro] Merging {len(processed_files)} clips -> {output_path}")
-    result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(concat_cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
     if result.returncode != 0:
         return None, f"Failed to merge clips:\n{result.stderr}"
     print(f"[BSAI Premiere Pro] Output saved: {output_path}")
@@ -841,7 +842,7 @@ def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
             output_path
         ]
         print(f"[BSAI Premiere Pro] Combining video and audio (apad) -> {output_path}")
-        result = subprocess.run(combine_cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(combine_cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
         if result.returncode != 0:
             return None, f"Failed to combine video and audio:\n{result.stderr}"
 
@@ -857,7 +858,7 @@ def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
             output_path
         ]
         print(f"[BSAI Premiere Pro] Saving video-only output -> {output_path}")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
         if result.returncode != 0:
             return None, f"Failed to save video:\n{result.stderr}"
 
@@ -876,7 +877,7 @@ def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
             output_path
         ]
         print(f"[BSAI Premiere Pro] Saving audio-only output with black video -> {output_path}")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
         if result.returncode != 0:
             return None, f"Failed to save audio:\n{result.stderr}"
 
@@ -885,3 +886,136 @@ def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
 
     print(f"[BSAI Premiere Pro] Output saved: {output_path}")
     return output_path, None
+
+
+def save_image_tensor(tensor, output_path):
+    """Save a PyTorch image tensor (B,H,W,C or H,W,C) as PNG."""
+    import numpy as np
+    try:
+        from PIL import Image
+    except ImportError:
+        return False
+    try:
+        arr = tensor.cpu().numpy()
+    except Exception:
+        return False
+    if arr.ndim == 4:
+        arr = arr[0]
+    arr = (arr * 255).clip(0, 255).astype(np.uint8)
+    try:
+        Image.fromarray(arr).save(output_path)
+        return True
+    except Exception as e:
+        print(f"[BSAI Premiere Pro] Failed to save image: {e}")
+        return False
+
+
+def save_audio_to_wav(audio_dict, output_path):
+    """Save a ComfyUI AUDIO dict {waveform, sample_rate} as a WAV file."""
+    import numpy as np
+    if not audio_dict or "waveform" not in audio_dict:
+        return False
+    try:
+        waveform = audio_dict["waveform"]
+        sample_rate = int(audio_dict.get("sample_rate", 44100))
+        arr = waveform.cpu().numpy()
+        if arr.ndim == 3:
+            arr = arr[0]
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        channels = arr.shape[0]
+        audio_int16 = (arr * 32767).clip(-32768, 32767).astype(np.int16)
+        with wave.open(output_path, "w") as wf:
+            wf.setnchannels(channels)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            wf.writeframes(audio_int16.T.tobytes())
+        return True
+    except Exception as e:
+        print(f"[BSAI Premiere Pro] Failed to save audio: {e}")
+        return False
+
+
+def merge_image_audio_to_video(image_tensor, audio_dict, output_path, fps=30, duration=None):
+    """Merge an image tensor and audio dict into a video file.
+
+    If image_tensor has batch > 1, creates a video from the image sequence.
+    If audio is provided, it is added to the video.
+    Returns (True, info_dict) on success, (False, error_msg) on failure.
+    """
+    ffmpeg = get_ffmpeg()
+    if not ffmpeg:
+        return False, "ffmpeg not found"
+    if image_tensor is None:
+        return False, "No image provided"
+
+    temp_dir = tempfile.mkdtemp(prefix="bsai_merge_")
+    try:
+        batch = image_tensor.shape[0] if image_tensor.dim() == 4 else 1
+
+        if batch > 1:
+            for i in range(batch):
+                frame = image_tensor[i] if image_tensor.dim() == 4 else image_tensor
+                frame_path = os.path.join(temp_dir, f"frame_{i:06d}.png")
+                if not save_image_tensor(frame, frame_path):
+                    return False, "Failed to save image frames"
+            img_input = os.path.join(temp_dir, "frame_%06d.png")
+            is_sequence = True
+        else:
+            img_path = os.path.join(temp_dir, "frame.png")
+            if not save_image_tensor(image_tensor, img_path):
+                return False, "Failed to save image"
+            img_input = img_path
+            is_sequence = False
+
+        audio_path = None
+        if audio_dict and "waveform" in audio_dict:
+            audio_path = os.path.join(temp_dir, "audio.wav")
+            if not save_audio_to_wav(audio_dict, audio_path):
+                audio_path = None
+
+        cmd = [ffmpeg, "-y", "-loglevel", "error"]
+
+        if is_sequence:
+            cmd.extend(["-framerate", str(fps), "-i", img_input])
+        else:
+            cmd.extend(["-loop", "1", "-i", img_input])
+
+        if audio_path:
+            cmd.extend(["-i", audio_path])
+
+        if not is_sequence and not audio_path and duration:
+            cmd.extend(["-t", str(duration)])
+        elif not is_sequence and not audio_path:
+            cmd.extend(["-t", "5"])
+
+        if audio_path:
+            cmd.extend([
+                "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+                "-pix_fmt", "yuv420p", "-r", str(fps),
+                "-c:a", "aac", "-b:a", "192k",
+                "-shortest",
+            ])
+        else:
+            cmd.extend([
+                "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+                "-pix_fmt", "yuv420p", "-r", str(fps),
+            ])
+
+        cmd.append(output_path)
+
+        print(f"[BSAI Premiere Pro] Merging image+audio -> {output_path}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            return False, f"ffmpeg failed: {result.stderr[:500]}"
+
+        info = get_video_info(output_path)
+        if info is None:
+            info = {"duration": 0, "width": 1920, "height": 1080, "fps": fps, "has_audio": audio_path is not None}
+        info["file_path"] = output_path
+        info["file_name"] = os.path.basename(output_path)
+        return True, info
+    except Exception as e:
+        return False, f"Error merging: {str(e)}"
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)

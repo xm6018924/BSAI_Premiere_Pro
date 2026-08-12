@@ -1,5 +1,6 @@
 import os
 import json
+import string
 import urllib.parse
 
 from server import PromptServer
@@ -105,3 +106,30 @@ async def get_status(request):
         "ffmpeg": ffmpeg or "not found",
         "ffprobe": ffprobe or "not found",
     })
+
+
+@PromptServer.instance.routes.get("/bsai_premiere_pro/browse")
+async def browse_directories(request):
+    raw_path = request.query.get("path", "")
+    path = urllib.parse.unquote(raw_path)
+    if not path or path == "":
+        try:
+            import folder_paths
+            base = folder_paths.base_path
+            path = os.path.dirname(base)
+        except Exception:
+            path = os.getcwd()
+    if not os.path.isdir(path):
+        return web.json_response({"error": "Not a directory", "path": path}, status=400)
+    parent = os.path.dirname(path.rstrip(os.sep)) or path
+    if parent == path:
+        parent = ""
+    dirs = []
+    try:
+        for item in sorted(os.listdir(path)):
+            full = os.path.join(path, item)
+            if os.path.isdir(full):
+                dirs.append(item)
+    except PermissionError:
+        pass
+    return web.json_response({"path": path, "parent": parent, "dirs": dirs})
