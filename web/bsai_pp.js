@@ -40,6 +40,7 @@ const STYLES = `
     width: 95vw; max-width: 1400px; height: 92vh; max-height: 900px;
     display: flex; flex-direction: column; overflow: hidden;
     box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    resize: both; min-width: 600px; min-height: 400px;
 }
 .bsai-pp-header {
     display: flex; align-items: center; justify-content: space-between;
@@ -735,11 +736,23 @@ function browseFilesDialog(initialPath) {
             listEl.innerHTML = `<div style="color:#666;padding:10px;">⏳ 加载中...</div>`;
             const timeoutId = setTimeout(() => loadingAbort.abort(), 30000);
             try {
-                const resp = await api.fetchApi(`/bsai_premiere_pro/browse_files?path=${encodeURIComponent(path)}`, {
+                // Try browse_files endpoint first (returns dirs + media files)
+                let resp = await api.fetchApi(`/bsai_premiere_pro/browse_files?path=${encodeURIComponent(path)}`, {
                     signal: loadingAbort.signal
                 });
+                let data = await resp.json();
+                // If browse_files fails (e.g. server not restarted), fallback to browse endpoint
+                if (data.error && !path) {
+                    resp = await api.fetchApi(`/bsai_premiere_pro/browse?path=${encodeURIComponent(path)}`, {
+                        signal: loadingAbort.signal
+                    });
+                    data = await resp.json();
+                    // browse endpoint returns dirs only, add empty files array
+                    if (!data.error) {
+                        data.files = [];
+                    }
+                }
                 clearTimeout(timeoutId);
-                const data = await resp.json();
                 if (data.error) {
                     listEl.innerHTML = `<div style="color:#d35454;padding:10px;">❌ ${escapeHtml(data.error)}<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>重试</button></div>`;
                     listEl.querySelector("[data-retry]")?.addEventListener("click", () => loadFiles(path));
@@ -1166,6 +1179,24 @@ class TimelineEditor {
             modalEl.classList.toggle("maximized");
             btn.innerHTML = modalEl.classList.contains("maximized") ? "🗗" : "⛶";
         };
+        // Mouse wheel on header to resize modal (without Ctrl; Ctrl+wheel = timeline zoom)
+        const headerEl = this.modal.querySelector(".bsai-pp-header");
+        if (headerEl) {
+            headerEl.addEventListener("wheel", (e) => {
+                e.preventDefault();
+                const modalEl = this.modal.querySelector(".bsai-pp-modal");
+                if (!modalEl || modalEl.classList.contains("maximized")) return;
+                const factor = e.deltaY < 0 ? 1.05 : 0.95;
+                const curW = modalEl.offsetWidth;
+                const curH = modalEl.offsetHeight;
+                const newW = Math.max(600, Math.min(window.innerWidth, curW * factor));
+                const newH = Math.max(400, Math.min(window.innerHeight, curH * factor));
+                modalEl.style.width = newW + "px";
+                modalEl.style.height = newH + "px";
+                modalEl.style.maxWidth = "none";
+                modalEl.style.maxHeight = "none";
+            }, { passive: false });
+        }
         this.modal.querySelector('[data-act="close-preview"]').onclick = (e) => {
             e.stopPropagation();
             this._stopPlayback();
@@ -1589,7 +1620,13 @@ class TimelineEditor {
     }
 
     async _importExternalFiles() {
-        const selected = await browseFilesDialog("");
+        // Use watch directory as initial path, fallback to output, then empty
+        const watchDir = this._getWidgetValue("watch_directory", "output");
+        let initialPath = "";
+        if (watchDir && watchDir !== "output") {
+            initialPath = watchDir;
+        }
+        const selected = await browseFilesDialog(initialPath);
         if (!selected || selected.length === 0) return;
         this._toast(`正在导入 ${selected.length} 个文件...`, "info");
         let imported = 0;
