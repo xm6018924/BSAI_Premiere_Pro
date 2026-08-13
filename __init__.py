@@ -18,7 +18,8 @@ WEB_DIRECTORY = "./web"
 import os
 from server import PromptServer
 
-_BSAI_SCRIPT_TAG = '<script src="/extensions/BSAI_Premiere_Pro/bsai_pp.js"></script>'
+_FOLDER_NAME = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
+_BSAI_SCRIPT_TAG = f'<script src="/extensions/{_FOLDER_NAME}/bsai_pp.js"></script>'
 
 
 def _inject_script_into_html(html):

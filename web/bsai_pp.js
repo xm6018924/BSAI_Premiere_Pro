@@ -266,14 +266,39 @@ const STYLES = `
 .bsai-pp-no-selection {
     color: #555; font-size: 13px; padding: 30px; text-align: center;
 }
-.bsai-pp-preview-section {
-    padding: 10px 16px; background: #1e1e1e; border-top: 1px solid #3a3a3a;
-    flex-shrink: 0; display: none;
+/* ── Timeline playback overlay (replaces separate preview window) ── */
+.bsai-pp-timeline-preview {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    background: #000; z-index: 200; display: none;
+    align-items: center; justify-content: center; overflow: hidden;
 }
-.bsai-pp-preview-section.visible { display: block; }
-.bsai-pp-preview-section video { max-width: 100%; max-height: 300px; border-radius: 4px; background: #000; }
-.bsai-pp-preview-section video:fullscreen { max-height: none; width: 100vw; height: 100vh; object-fit: contain; }
-.bsai-pp-preview-section video:-webkit-full-screen { max-height: none; width: 100vw; height: 100vh; object-fit: contain; }
+.bsai-pp-timeline-preview.visible { display: flex; }
+.bsai-pp-timeline-preview video {
+    width: 100%; height: 100%; object-fit: contain; background: #000;
+}
+.bsai-pp-timeline-preview .preview-close {
+    position: absolute; top: 8px; right: 8px; z-index: 201;
+    background: rgba(0,0,0,0.7); color: #fff; border: none;
+    width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 16px;
+}
+.bsai-pp-timeline-preview .preview-close:hover { background: rgba(220,53,53,0.8); }
+.bsai-pp-timeline-preview .preview-info {
+    position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); z-index: 201;
+    background: rgba(0,0,0,0.75); color: #fff; padding: 6px 16px;
+    border-radius: 6px; font-size: 12px; font-family: monospace; white-space: nowrap;
+}
+.bsai-pp-timeline-preview .preview-progress {
+    position: absolute; bottom: 0; left: 0; width: 0%; height: 3px;
+    background: #4a90d9; z-index: 201; transition: width 0.1s linear;
+}
+/* ── Zoom controls ── */
+.bsai-pp-zoom-display { color: #aaa; font-size: 11px; min-width: 38px; text-align: center; user-select: none; }
+/* ── Alignment controls ── */
+.bsai-pp-align-select {
+    background: #1a1a1a; border: 1px solid #444; color: #e0e0e0;
+    padding: 3px 6px; border-radius: 3px; font-size: 11px;
+}
+.bsai-pp-pos-slider { width: 70px; cursor: pointer; vertical-align: middle; }
 .bsai-pp-footer {
     padding: 10px 16px; background: #252525; border-top: 1px solid #3a3a3a;
     display: flex; align-items: center; justify-content: space-between;
@@ -311,12 +336,12 @@ const STYLES = `
 .bsai-pp-import-dialog {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
     background: #2a2a2a; border: 1px solid #444; border-radius: 8px;
-    padding: 20px; z-index: 100002; min-width: 400px; max-width: 600px;
-    max-height: 70vh; overflow-y: auto;
+    padding: 20px; z-index: 100002; min-width: 400px; max-width: 700px;
+    max-height: 85vh; overflow-y: auto;
 }
 .bsai-pp-import-dialog h3 { color: #e0e0e0; margin: 0 0 12px 0; font-size: 14px; }
 .bsai-pp-import-list {
-    max-height: 500px; overflow-y: auto; margin: 10px 0;
+    max-height: 60vh; overflow-y: auto; margin: 10px 0;
 }
 .bsai-pp-import-list::-webkit-scrollbar { width: 8px; }
 .bsai-pp-import-list::-webkit-scrollbar-track { background: #1a1a1a; border-radius: 4px; }
@@ -341,7 +366,7 @@ const STYLES = `
     height: 100vh !important; max-height: 100vh !important; border-radius: 0 !important;
 }
 .bsai-pp-import-dialog.maximized .bsai-pp-import-list {
-    max-height: calc(100vh - 220px) !important;
+    max-height: calc(100vh - 180px) !important;
 }
 .bsai-pp-modal.maximized {
     width: 100vw !important; max-width: 100vw !important;
@@ -935,6 +960,10 @@ class TimelineEditor {
         this.scissorMode = false;
         this.boxSelected = new Set();
         this.thumbCache = new Map();
+        this._zoomLevel = 1;
+        this._isPlaying = false;
+        this._playClips = [];
+        this._playClipIndex = 0;
         this.td = this._load();
     }
 
@@ -1081,26 +1110,33 @@ class TimelineEditor {
                     <button class="bsai-pp-btn" data-act="add-atrack">＋ 音频轨道</button>
                     <button class="bsai-pp-btn bsai-pp-btn-danger" data-act="clear-all">🗑 清空全部</button>
                     <button class="bsai-pp-btn" data-act="batch-select" id="bsai-pp-batch-btn">☑ 批量选择</button>
+                    <label>对齐</label>
+                    <select class="bsai-pp-align-select" data-act="align-mode" title="横竖屏对齐方式">
+                        <option value="height">高度对齐</option>
+                        <option value="width">宽度对齐</option>
+                    </select>
+                    <button class="bsai-pp-btn" data-act="zoom-out" style="padding:3px 8px;font-size:14px;">－</button>
+                    <span class="bsai-pp-zoom-display" data-zoom-display>100%</span>
+                    <button class="bsai-pp-btn" data-act="zoom-in" style="padding:3px 8px;font-size:14px;">＋</button>
                     <div class="bsai-pp-status">
                         <span><span class="dot ${this._getWidgetValue("auto_import", true) ? "on" : "off"}" data-dot></span> ${this._getWidgetValue("auto_import", true) ? "监控中" : "已停止"}</span>
                     </div>
                 </div>
                 <div class="bsai-pp-body">
-                    <div class="bsai-pp-timeline-section">
-                        <div class="bsai-pp-timeline-scroll">
+                    <div class="bsai-pp-timeline-section" style="position:relative;">
+                        <div class="bsai-pp-timeline-scroll" data-timeline-scroll>
                             <div class="bsai-pp-timeline-container" data-track-container></div>
+                        </div>
+                        <div class="bsai-pp-timeline-preview" data-timeline-preview>
+                            <video data-preview-video></video>
+                            <button class="preview-close" data-act="close-preview">✕</button>
+                            <div class="preview-info" data-preview-info></div>
+                            <div class="preview-progress" data-preview-progress></div>
                         </div>
                     </div>
                     <div class="bsai-pp-edit-section">
                         <div class="bsai-pp-section-label">剪辑面板</div>
                         <div class="bsai-pp-edit-content" data-edit></div>
-                    </div>
-                    <div class="bsai-pp-preview-section" data-preview>
-                        <div class="bsai-pp-section-label" style="display:flex;justify-content:space-between;align-items:center;">
-                            <span>预览</span>
-                            <button class="bsai-pp-btn" data-act="fullscreen" style="padding:2px 10px;font-size:11px;">⛶ 全屏</button>
-                        </div>
-                        <video controls data-preview-video></video>
                     </div>
                 </div>
                 <div class="bsai-pp-footer">
@@ -1117,14 +1153,30 @@ class TimelineEditor {
             modalEl.classList.toggle("maximized");
             btn.innerHTML = modalEl.classList.contains("maximized") ? "🗗" : "⛶";
         };
-        this.modal.querySelector('[data-act="fullscreen"]').onclick = (e) => {
+        this.modal.querySelector('[data-act="close-preview"]').onclick = (e) => {
             e.stopPropagation();
-            const video = this.modal.querySelector("[data-preview-video]");
-            if (!video) return;
-            if (video.requestFullscreen) video.requestFullscreen();
-            else if (video.webkitRequestFullscreen) video.webkitRequestFullscreen();
-            else if (video.msRequestFullscreen) video.msRequestFullscreen();
+            this._stopPlayback();
         };
+        this.modal.querySelector('[data-act="zoom-in"]').onclick = () => this._adjustZoom(1.25);
+        this.modal.querySelector('[data-act="zoom-out"]').onclick = () => this._adjustZoom(0.8);
+        this.modal.querySelector('[data-act="align-mode"]').onchange = (e) => {
+            this.td.align_mode = e.target.value;
+            this._save();
+            this._renderTimeline();
+        };
+        // Restore align mode from saved state
+        const alignSelect = this.modal.querySelector('[data-act="align-mode"]');
+        if (alignSelect && this.td.align_mode) alignSelect.value = this.td.align_mode;
+        // Mouse wheel zoom on timeline
+        const timelineScroll = this.modal.querySelector("[data-timeline-scroll]");
+        if (timelineScroll) {
+            timelineScroll.addEventListener("wheel", (e) => {
+                if (e.ctrlKey || e.metaKey) {
+                    e.preventDefault();
+                    this._adjustZoom(e.deltaY < 0 ? 1.15 : 0.87);
+                }
+            }, { passive: false });
+        }
         this.modal.querySelector('[data-act="auto-import"]').onchange = (e) => {
             const w = this._getWidget("auto_import");
             if (w) w.value = e.target.checked;
@@ -1196,7 +1248,8 @@ class TimelineEditor {
         const containerWidth = scrollEl?.clientWidth || 1000;
         const availableWidth = containerWidth - 150 - 20;
         const totalDuration = Math.max(maxDuration, 10);
-        this._pps = Math.max(6, Math.min(30, availableWidth / totalDuration));
+        // Apply zoom level to pixels-per-second
+        this._pps = Math.max(6, Math.min(30, availableWidth / totalDuration)) * (this._zoomLevel || 1);
         this._totalDuration = totalDuration;
 
         const ruler = document.createElement("div");
@@ -1244,8 +1297,17 @@ class TimelineEditor {
         return html;
     }
 
+    _adjustZoom(factor) {
+        const old = this._zoomLevel || 1;
+        this._zoomLevel = Math.max(0.2, Math.min(8, old * factor));
+        if (Math.abs(this._zoomLevel - old) < 0.01) return;
+        const display = this.modal.querySelector("[data-zoom-display]");
+        if (display) display.textContent = Math.round(this._zoomLevel * 100) + "%";
+        this._renderTimeline();
+    }
+
     _createTrackRow(trackType, trackIndex, trackInfo) {
-        const row = document.createElement("div");
+         const row = document.createElement("div");
         const isVideo = trackType === "video";
         row.className = "bsai-pp-track-row" + (isVideo ? " video-track" : " audio-track");
         const trackName = trackInfo.name || (isVideo ? `V${trackIndex + 1}` : `A${trackIndex + 1}`);
@@ -1637,13 +1699,12 @@ class TimelineEditor {
             return;
         }
         this._playClips = videoClips;
-        this._playClipIndex = this._playClipIndex || 0;
-        if (this._playClipIndex >= videoClips.length) this._playClipIndex = 0;
+        this._playClipIndex = 0;
         this._isPlaying = true;
         const btn = this.modal.querySelector("#bsai-pp-play-btn");
         if (btn) btn.textContent = "⏸️ 暂停";
-        // Make preview section visible during playback
-        this.modal.querySelector("[data-preview]")?.classList.add("visible");
+        // Show timeline preview overlay (fills the entire timeline area)
+        this.modal.querySelector("[data-timeline-preview]")?.classList.add("visible");
         this._playNextClip();
     }
 
@@ -1668,6 +1729,16 @@ class TimelineEditor {
 
         videoEl.src = videoSrc;
 
+        // Apply alignment: object-fit based on align_mode
+        const alignMode = this.td.align_mode || "height";
+        // For mixed aspect ratios: height-align = fill height (object-fit: contain),
+        // width-align = fill width (object-fit: cover would crop, so use contain + transform)
+        videoEl.style.objectFit = "contain";
+        // Apply manual position offset (pos_x, pos_y are -100 to 100)
+        const posX = clip.pos_x ?? 0;
+        const posY = clip.pos_y ?? 0;
+        videoEl.style.transform = `translate(${posX}%, ${posY}%)`;
+
         videoEl.onloadedmetadata = () => {
             if (trimStart > 0) {
                 try { videoEl.currentTime = trimStart; } catch {}
@@ -1675,14 +1746,28 @@ class TimelineEditor {
             videoEl.play().catch(() => {});
         };
 
+        // Update preview info and progress bar
+        const infoEl = this.modal.querySelector("[data-preview-info]");
+        const progressEl = this.modal.querySelector("[data-preview-progress]");
+        const clipDur = trimEnd - trimStart;
+
         // Stop at trim_end
         videoEl.ontimeupdate = () => {
             if (trimEnd > 0 && videoEl.currentTime >= trimEnd) {
                 videoEl.pause();
                 videoEl.onended?.();
             }
-            // Animate playhead
-            this._animatePlayhead();
+            // Update progress bar
+            if (progressEl && clipDur > 0) {
+                const elapsed = Math.max(0, videoEl.currentTime - trimStart);
+                const pct = Math.min(100, (elapsed / clipDur) * 100);
+                progressEl.style.width = pct + "%";
+            }
+            // Update info text
+            if (infoEl) {
+                const elapsed = Math.max(0, videoEl.currentTime - trimStart);
+                infoEl.textContent = `▶ ${clip.file_name || ""} | ${formatTime(elapsed)} / ${formatTime(clipDur)} | ${this._playClipIndex + 1}/${this._playClips.length}`;
+            }
         };
 
         // Show clip info in footer
@@ -1690,9 +1775,6 @@ class TimelineEditor {
         if (footerInfo) {
             footerInfo.textContent = `▶ 播放中: ${clip.file_name} (${this._playClipIndex + 1}/${this._playClips.length})`;
         }
-
-        // Set up playhead
-        this._updatePlayhead(clip);
 
         videoEl.onended = () => {
             this._playClipIndex++;
@@ -1717,9 +1799,12 @@ class TimelineEditor {
         this._playClipIndex = 0;
         const videoEl = this.modal.querySelector("[data-preview-video]");
         if (videoEl) { videoEl.pause(); videoEl.removeAttribute("src"); videoEl.load(); }
+        // Hide timeline preview overlay
+        this.modal.querySelector("[data-timeline-preview]")?.classList.remove("visible");
         const btn = this.modal.querySelector("#bsai-pp-play-btn");
         if (btn) btn.textContent = "▶️ 播放";
-        this._removePlayhead();
+        const progressEl = this.modal.querySelector("[data-preview-progress]");
+        if (progressEl) progressEl.style.width = "0%";
         const footerInfo = this.modal.querySelector("[data-footer-info]");
         if (footerInfo) footerInfo.textContent = "";
     }
@@ -2426,6 +2511,8 @@ class TimelineEditor {
                 <input type="number" min="0" max="${dur}" step="0.1" value="${trimEnd}" data-field="trim_end" data-sync="1">
             </div>`;
         if (isVideo) {
+            const posX = clip.pos_x ?? 0;
+            const posY = clip.pos_y ?? 0;
             html += `
             <div class="bsai-pp-edit-row">
                 <label>入场过渡</label>
@@ -2442,6 +2529,14 @@ class TimelineEditor {
             <div class="bsai-pp-edit-row">
                 <label>视频启用</label>
                 <input type="checkbox" data-field="video_enabled" ${clip.video_enabled !== false ? "checked" : ""}>
+                <label>画面位置</label>
+                <span style="color:#888;font-size:11px;">X</span>
+                <input type="range" class="bsai-pp-pos-slider" min="-100" max="100" step="1" value="${posX}" data-field="pos_x">
+                <input type="number" min="-100" max="100" step="1" value="${posX}" data-field="pos_x" style="width:50px;">
+                <span style="color:#888;font-size:11px;">Y</span>
+                <input type="range" class="bsai-pp-pos-slider" min="-100" max="100" step="1" value="${posY}" data-field="pos_y">
+                <input type="number" min="-100" max="100" step="1" value="${posY}" data-field="pos_y" style="width:50px;">
+                <button class="bsai-pp-btn" data-act="reset-pos" style="padding:3px 8px;font-size:11px;">重置</button>
             </div>`;
         } else {
             html += `
@@ -2554,6 +2649,13 @@ class TimelineEditor {
         };
         const syncBtn = panel.querySelector('[data-act="sync-linked"]');
         if (syncBtn) syncBtn.onclick = () => this._syncLinkedClip(clip);
+        const resetPosBtn = panel.querySelector('[data-act="reset-pos"]');
+        if (resetPosBtn) resetPosBtn.onclick = () => {
+            clip.pos_x = 0;
+            clip.pos_y = 0;
+            this._save();
+            this._renderEditPanel();
+        };
     }
 
     _toggleLink(clip) {
@@ -3036,11 +3138,13 @@ class TimelineEditor {
     }
 
     _showPreview(filename) {
-        const section = this.modal.querySelector("[data-preview]");
+        const overlay = this.modal.querySelector("[data-timeline-preview]");
         const video = this.modal.querySelector("[data-preview-video]");
-        if (section && video) {
+        if (overlay && video) {
             video.src = `/view?filename=${encodeURIComponent(filename)}&type=output`;
-            section.classList.add("visible");
+            overlay.classList.add("visible");
+            const infoEl = this.modal.querySelector("[data-preview-info]");
+            if (infoEl) infoEl.textContent = `🎞️ 渲染结果: ${filename}`;
             video.play().catch(() => {});
         }
     }

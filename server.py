@@ -195,10 +195,24 @@ async def browse_directories(request):
             with os.scandir(p) as entries:
                 for entry in entries:
                     try:
-                        if entry.is_dir():
+                        is_d = entry.is_dir()
+                        if not is_d:
+                            # Fallback: some special dirs/junctions fail is_dir()
+                            full = os.path.join(p, entry.name)
+                            if os.path.isdir(full):
+                                is_d = True
+                        if is_d:
                             dirs.append(entry.name)
                     except OSError as e:
-                        errors.append(f"{entry.name}: {e}")
+                        # Try fallback before giving up
+                        try:
+                            full = os.path.join(p, entry.name)
+                            if os.path.isdir(full):
+                                dirs.append(entry.name)
+                            else:
+                                errors.append(f"{entry.name}: {e}")
+                        except Exception:
+                            errors.append(f"{entry.name}: {e}")
         except PermissionError:
             errors.append("Permission denied")
         except Exception as e:
@@ -248,7 +262,12 @@ async def browse_files(request):
             with os.scandir(p) as entries:
                 for entry in entries:
                     try:
-                        if entry.is_dir():
+                        is_d = entry.is_dir()
+                        if not is_d:
+                            full = os.path.join(p, entry.name)
+                            if os.path.isdir(full):
+                                is_d = True
+                        if is_d:
                             dirs.append(entry.name)
                         elif entry.is_file():
                             ext = os.path.splitext(entry.name)[1].lower()
@@ -264,7 +283,12 @@ async def browse_files(request):
                                     "ext": ext,
                                 })
                     except OSError:
-                        pass
+                        try:
+                            full = os.path.join(p, entry.name)
+                            if os.path.isdir(full):
+                                dirs.append(entry.name)
+                        except Exception:
+                            pass
         except PermissionError:
             pass
         dirs.sort()

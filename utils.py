@@ -257,10 +257,27 @@ def format_time(seconds):
     return f"{minutes:02d}:{secs:05.2f}"
 
 
-def _build_vf_filters(clip, clip_duration, clip_index, total_clips, default_transition, transition_duration, target_w, target_h, target_fps):
+def _build_vf_filters(clip, clip_duration, clip_index, total_clips, default_transition, transition_duration, target_w, target_h, target_fps, align_mode="height"):
+    pos_x = int(clip.get("pos_x", 0))
+    pos_y = int(clip.get("pos_y", 0))
+
+    if align_mode == "width":
+        # Width alignment: scale so width fills target, height scales proportionally
+        scale_filter = f"scale={target_w}:-2:force_original_aspect_ratio=decrease"
+        # After scaling, pad to target height, apply position offset
+        pad_x = f"(ow-iw)/2+{pos_x}*iw/100"
+        pad_y = f"(oh-ih)/2+{pos_y}*ih/100"
+        pad_filter = f"pad={target_w}:{target_h}:{pad_x}:{pad_y}:black"
+    else:
+        # Height alignment (default): scale so height fills target, width scales proportionally
+        scale_filter = f"scale=-2:{target_h}:force_original_aspect_ratio=decrease"
+        pad_x = f"(ow-iw)/2+{pos_x}*iw/100"
+        pad_y = f"(oh-ih)/2+{pos_y}*ih/100"
+        pad_filter = f"pad={target_w}:{target_h}:{pad_x}:{pad_y}:black"
+
     filters = [
-        f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease",
-        f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black",
+        scale_filter,
+        pad_filter,
         f"fps={target_fps}",
         "setsar=1",
     ]
@@ -322,7 +339,7 @@ def _build_af_filters(clip, clip_duration, clip_index, total_clips, default_tran
 
 
 def _build_clip_command(clip, output_file, target_w, target_h, target_fps,
-                        default_transition, transition_duration, clip_index, total_clips):
+                        default_transition, transition_duration, clip_index, total_clips, align_mode="height"):
     ffmpeg = get_ffmpeg()
     if not ffmpeg:
         return None
@@ -347,7 +364,7 @@ def _build_clip_command(clip, output_file, target_w, target_h, target_fps,
 
         vf_filters = _build_vf_filters(
             clip, clip_duration, clip_index, total_clips,
-            default_transition, transition_duration, target_w, target_h, target_fps
+            default_transition, transition_duration, target_w, target_h, target_fps, align_mode
         )
         cmd.extend(["-vf", ",".join(vf_filters)])
         cmd.extend(["-map", "0:v:0", "-an"])
@@ -459,7 +476,7 @@ def _build_clip_command(clip, output_file, target_w, target_h, target_fps,
 
 
 def _process_track_clips(clips, track_type, track_index, temp_dir, target_w, target_h, target_fps,
-                         default_transition, transition_duration):
+                         default_transition, transition_duration, align_mode="height"):
     """Process all clips in a single track and concatenate them.
 
     Returns the path to the merged track file, or None on failure.
@@ -483,7 +500,7 @@ def _process_track_clips(clips, track_type, track_index, temp_dir, target_w, tar
         output_file = os.path.join(track_temp_dir, f"clip_{i:04d}.mp4")
         cmd = _build_clip_command(
             clip, output_file, target_w, target_h, target_fps,
-            default_transition, transition_duration, i, total_clips
+            default_transition, transition_duration, i, total_clips, align_mode
         )
         if not cmd:
             print(f"[BSAI Premiere Pro] Skipping clip {i} in {track_type} track {track_index}: file not found or invalid")
@@ -635,6 +652,7 @@ def process_and_merge(timeline_data, output_filename, format_str, pix_fmt,
     crf = str(int(crf)) if crf else "19"
 
     is_multitrack = any("track_type" in c for c in clips)
+    align_mode = timeline_data.get("align_mode", "height")
 
     if is_multitrack:
         enabled_clips = []
@@ -699,7 +717,7 @@ def process_and_merge(timeline_data, output_filename, format_str, pix_fmt,
             return _process_legacy(
                 enabled_clips, temp_dir, output_path,
                 target_w, target_h, target_fps, crf, video_codec, pix_fmt,
-                default_transition, transition_duration, ffmpeg
+                default_transition, transition_duration, ffmpeg, align_mode
             )
     except Exception as e:
         return None, f"Error during processing: {str(e)}"
@@ -709,14 +727,14 @@ def process_and_merge(timeline_data, output_filename, format_str, pix_fmt,
 
 def _process_legacy(enabled_clips, temp_dir, output_path,
                     target_w, target_h, target_fps, crf, video_codec, pix_fmt,
-                    default_transition, transition_duration, ffmpeg):
+                    default_transition, transition_duration, ffmpeg, align_mode="height"):
     """Legacy mode: sequential concat with both video and audio from each clip."""
     processed_files = []
     for i, clip in enumerate(enabled_clips):
         output_file = os.path.join(temp_dir, f"clip_{i:04d}.mp4")
         cmd = _build_clip_command(
             clip, output_file, target_w, target_h, int(target_fps),
-            default_transition, transition_duration, i, len(enabled_clips)
+            default_transition, transition_duration, i, len(enabled_clips), align_mode
         )
         if not cmd:
             print(f"[BSAI Premiere Pro] Skipping clip {i}: file not found or invalid")
@@ -758,6 +776,7 @@ def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
     """Multi-track mode: process video and audio tracks separately, then combine."""
     video_tracks = timeline_data.get("video_tracks", [])
     audio_tracks = timeline_data.get("audio_tracks", [])
+    align_mode = timeline_data.get("align_mode", "height")
 
     # Group clips by track_type and track_index
     video_clips_by_track = {}
@@ -782,7 +801,7 @@ def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
         merged = _process_track_clips(
             track_clips, "video", ti, temp_dir,
             target_w, target_h, int(target_fps),
-            default_transition, transition_duration
+            default_transition, transition_duration, align_mode
         )
         if merged:
             video_track_files.append(merged)
