@@ -3,13 +3,16 @@
  * Ensures the main extension script is loaded even if the
  * __init__.py HTML middleware fails (e.g. on fresh GitHub install).
  * ComfyUI auto-discovers this file via WEB_DIRECTORY = "./web".
+ *
+ * Loads the main script IMMEDIATELY (without waiting for app ready)
+ * to maximize the chance of registering beforeRegisterNodeDef hooks
+ * before ComfyUI registers node types. The main script has its own
+ * internal retry mechanism for waiting for the app.
  */
 (function () {
     "use strict";
 
     function loadMainScript() {
-        // The main script sets window.__bsai_pp_loaded itself;
-        // we only check it here to avoid double-injecting the <script> tag.
         if (window.__bsai_pp_script_injected) return;
         window.__bsai_pp_script_injected = true;
 
@@ -18,27 +21,22 @@
         script.onerror = function () {
             window.__bsai_pp_script_injected = false;
             console.error("[BSAI Premiere Pro] Failed to load bsai_pp.js");
+            // Retry after 1 second
+            setTimeout(function () {
+                loadMainScript();
+            }, 1000);
         };
         document.head.appendChild(script);
     }
 
-    // Wait for ComfyUI app to be ready before loading
-    function tryLoad() {
-        var app = (window.comfyAPI && window.comfyAPI.app && window.comfyAPI.app.app) || window.app;
-        if (app && typeof app.registerExtension === "function") {
-            loadMainScript();
-        } else {
-            if (!window.__bsai_pp_retry_count) window.__bsai_pp_retry_count = 0;
-            if (window.__bsai_pp_retry_count < 50) {
-                window.__bsai_pp_retry_count++;
-                setTimeout(tryLoad, 200);
-            }
-        }
-    }
-
+    // Load immediately - the main script handles waiting for the app internally
+    // via _registerBsaiPP() which retries every 200ms until app.registerExtension
+    // is available.
     if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", tryLoad);
+        // DOM still loading - inject as soon as possible
+        document.addEventListener("DOMContentLoaded", loadMainScript);
     } else {
-        tryLoad();
+        // DOM already loaded - inject now
+        loadMainScript();
     }
 })();

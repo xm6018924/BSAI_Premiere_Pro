@@ -271,7 +271,9 @@ const STYLES = `
     flex-shrink: 0; display: none;
 }
 .bsai-pp-preview-section.visible { display: block; }
-.bsai-pp-preview-section video { max-width: 100%; max-height: 200px; border-radius: 4px; }
+.bsai-pp-preview-section video { max-width: 100%; max-height: 300px; border-radius: 4px; background: #000; }
+.bsai-pp-preview-section video:fullscreen { max-height: none; width: 100vw; height: 100vh; object-fit: contain; }
+.bsai-pp-preview-section video:-webkit-full-screen { max-height: none; width: 100vw; height: 100vh; object-fit: contain; }
 .bsai-pp-footer {
     padding: 10px 16px; background: #252525; border-top: 1px solid #3a3a3a;
     display: flex; align-items: center; justify-content: space-between;
@@ -314,7 +316,36 @@ const STYLES = `
 }
 .bsai-pp-import-dialog h3 { color: #e0e0e0; margin: 0 0 12px 0; font-size: 14px; }
 .bsai-pp-import-list {
-    max-height: 300px; overflow-y: auto; margin: 10px 0;
+    max-height: 500px; overflow-y: auto; margin: 10px 0;
+}
+.bsai-pp-import-list::-webkit-scrollbar { width: 8px; }
+.bsai-pp-import-list::-webkit-scrollbar-track { background: #1a1a1a; border-radius: 4px; }
+.bsai-pp-import-list::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
+.bsai-pp-import-list::-webkit-scrollbar-thumb:hover { background: #777; }
+.bsai-pp-import-list { scrollbar-width: thin; scrollbar-color: #555 #1a1a1a; }
+/* ── Dialog header with maximize button ── */
+.bsai-pp-dlg-header {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;
+}
+.bsai-pp-dlg-header h3 { margin: 0; flex: 1; }
+.bsai-pp-dlg-maximize {
+    background: #3a3a3a; border: none; color: #ccc; cursor: pointer;
+    width: 28px; height: 28px; border-radius: 4px; font-size: 14px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.bsai-pp-dlg-maximize:hover { background: #4a90d9; color: #fff; }
+/* ── Maximized dialog state ── */
+.bsai-pp-import-dialog.maximized {
+    top: 0 !important; left: 0 !important; transform: none !important;
+    width: 100vw !important; min-width: 100vw !important; max-width: 100vw !important;
+    height: 100vh !important; max-height: 100vh !important; border-radius: 0 !important;
+}
+.bsai-pp-import-dialog.maximized .bsai-pp-import-list {
+    max-height: calc(100vh - 220px) !important;
+}
+.bsai-pp-modal.maximized {
+    width: 100vw !important; max-width: 100vw !important;
+    height: 100vh !important; max-height: 100vh !important; border-radius: 0 !important;
 }
 .bsai-pp-import-item {
     display: flex; align-items: center; gap: 8px; padding: 6px 10px;
@@ -387,6 +418,48 @@ const STYLES = `
     document.head.appendChild(el);
 })();
 
+// ── Helper: add maximize button to any dialog ──────────────────────
+function _addMaximizeBtn(dialog) {
+    // For the main modal (.bsai-pp-modal inside overlay)
+    const modal = dialog.querySelector(".bsai-pp-modal");
+    if (modal) {
+        const header = modal.querySelector(".bsai-pp-header");
+        if (header && !header.querySelector(".bsai-pp-dlg-maximize")) {
+            const closeBtn = header.querySelector(".bsai-pp-close");
+            const maxBtn = document.createElement("button");
+            maxBtn.className = "bsai-pp-close bsai-pp-dlg-maximize";
+            maxBtn.style.marginRight = "6px";
+            maxBtn.innerHTML = "⛶";
+            maxBtn.title = "最大化/还原";
+            maxBtn.onclick = (e) => {
+                e.stopPropagation();
+                modal.classList.toggle("maximized");
+                maxBtn.innerHTML = modal.classList.contains("maximized") ? "🗗" : "⛶";
+            };
+            header.insertBefore(maxBtn, closeBtn);
+        }
+        return;
+    }
+    // For small dialogs (.bsai-pp-import-dialog)
+    if (dialog.querySelector(".bsai-pp-dlg-maximize")) return;
+    const h3 = dialog.querySelector("h3");
+    if (!h3) return;
+    const header = document.createElement("div");
+    header.className = "bsai-pp-dlg-header";
+    h3.parentNode.insertBefore(header, h3);
+    header.appendChild(h3);
+    const maxBtn = document.createElement("button");
+    maxBtn.className = "bsai-pp-dlg-maximize";
+    maxBtn.innerHTML = "⛶";
+    maxBtn.title = "最大化/还原";
+    maxBtn.onclick = (e) => {
+        e.stopPropagation();
+        dialog.classList.toggle("maximized");
+        maxBtn.innerHTML = dialog.classList.contains("maximized") ? "🗗" : "⛶";
+    };
+    header.appendChild(maxBtn);
+}
+
 // ── Standalone directory browser (usable from node button) ──────────
 function browseDirectoryDialog(initialPath) {
     return new Promise((resolve) => {
@@ -402,13 +475,14 @@ function browseDirectoryDialog(initialPath) {
                 <input type="text" data-manual-path style="flex:1;background:#1a1a1a;border:1px solid #444;color:#e0e0e0;padding:5px 8px;border-radius:4px;font-size:12px;" placeholder="输入路径后回车前往，如 C:\\Users\\...">
                 <button class="bsai-pp-btn" data-act="go">前往</button>
             </div>
-            <div class="bsai-pp-import-list" data-dir-list style="max-height:300px;"></div>
+            <div class="bsai-pp-import-list" data-dir-list></div>
             <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
                 <button class="bsai-pp-btn" data-cancel>取消</button>
                 <button class="bsai-pp-btn bsai-pp-btn-primary" data-select>选择此目录</button>
             </div>`;
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
+        _addMaximizeBtn(dialog);
 
         let currentPath = "";
         let loadingAbort = null;
@@ -787,7 +861,10 @@ class TimelineEditor {
             <div class="bsai-pp-modal">
                 <div class="bsai-pp-header">
                     <span class="bsai-pp-title">🎬 BSAI Premiere Pro - 时间轴编辑器</span>
-                    <button class="bsai-pp-close" data-act="close">✕</button>
+                    <div style="display:flex;gap:6px;">
+                        <button class="bsai-pp-close bsai-pp-dlg-maximize" data-act="maximize" title="最大化/还原">⛶</button>
+                        <button class="bsai-pp-close" data-act="close" title="关闭">✕</button>
+                    </div>
                 </div>
                 <div class="bsai-pp-toolbar">
                     <label>自动导入</label>
@@ -822,7 +899,10 @@ class TimelineEditor {
                         <div class="bsai-pp-edit-content" data-edit></div>
                     </div>
                     <div class="bsai-pp-preview-section" data-preview>
-                        <div class="bsai-pp-section-label">预览</div>
+                        <div class="bsai-pp-section-label" style="display:flex;justify-content:space-between;align-items:center;">
+                            <span>预览</span>
+                            <button class="bsai-pp-btn" data-act="fullscreen" style="padding:2px 10px;font-size:11px;">⛶ 全屏</button>
+                        </div>
                         <video controls data-preview-video></video>
                     </div>
                 </div>
@@ -833,6 +913,21 @@ class TimelineEditor {
             </div>`;
         this.modal.addEventListener("click", (e) => this._onClick(e));
         this.modal.querySelector('[data-act="close"]').onclick = () => this.close();
+        this.modal.querySelector('[data-act="maximize"]').onclick = (e) => {
+            e.stopPropagation();
+            const modalEl = this.modal.querySelector(".bsai-pp-modal");
+            const btn = e.currentTarget;
+            modalEl.classList.toggle("maximized");
+            btn.innerHTML = modalEl.classList.contains("maximized") ? "🗗" : "⛶";
+        };
+        this.modal.querySelector('[data-act="fullscreen"]').onclick = (e) => {
+            e.stopPropagation();
+            const video = this.modal.querySelector("[data-preview-video]");
+            if (!video) return;
+            if (video.requestFullscreen) video.requestFullscreen();
+            else if (video.webkitRequestFullscreen) video.webkitRequestFullscreen();
+            else if (video.msRequestFullscreen) video.msRequestFullscreen();
+        };
         this.modal.querySelector('[data-act="auto-import"]').onchange = (e) => {
             const w = this._getWidget("auto_import");
             if (w) w.value = e.target.checked;
@@ -1281,6 +1376,8 @@ class TimelineEditor {
         this._isPlaying = true;
         const btn = this.modal.querySelector("#bsai-pp-play-btn");
         if (btn) btn.textContent = "⏸️ 暂停";
+        // Make preview section visible during playback
+        this.modal.querySelector("[data-preview]")?.classList.add("visible");
         this._playNextClip();
     }
 
@@ -1495,6 +1592,7 @@ class TimelineEditor {
             </div>`;
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
+        _addMaximizeBtn(dialog);
         dialog.querySelector("[data-cancel]").onclick = () => overlay.remove();
         dialog.querySelector("[data-confirm]").onclick = () => {
             const clipIdsToDelete = new Set();
@@ -1550,6 +1648,7 @@ class TimelineEditor {
             </div>`;
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
+        _addMaximizeBtn(dialog);
         dialog.querySelector("[data-cancel]").onclick = () => overlay.remove();
         dialog.querySelector("[data-confirm]").onclick = () => {
             // Track all deleted files to prevent auto-reimport
@@ -2165,6 +2264,7 @@ class TimelineEditor {
                     </div>`;
                 overlay.appendChild(dialog);
                 document.body.appendChild(overlay);
+                _addMaximizeBtn(dialog);
                 dialog.querySelector("[data-cancel]").onclick = () => overlay.remove();
                 dialog.querySelector("[data-confirm]").onclick = () => {
                     overlay.remove();
@@ -2370,6 +2470,7 @@ class TimelineEditor {
             </div>`;
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
+        _addMaximizeBtn(dialog);
         const selected = new Set();
         dialog.querySelectorAll(".bsai-pp-import-item").forEach(item => {
             item.onclick = () => {
@@ -2536,6 +2637,7 @@ class TimelineEditor {
                 </div>`;
             overlay.appendChild(dialog);
             document.body.appendChild(overlay);
+            _addMaximizeBtn(dialog);
             dialog.querySelector("[data-cancel]").onclick = () => overlay.remove();
             dialog.querySelectorAll(".bsai-pp-import-item").forEach(item => {
                 item.onclick = async () => {
@@ -2607,6 +2709,7 @@ class TimelineEditor {
                 </div>`;
             overlay.appendChild(dialog);
             document.body.appendChild(overlay);
+            _addMaximizeBtn(dialog);
             dialog.querySelector("[data-cancel]").onclick = () => overlay.remove();
             dialog.querySelectorAll(".bsai-pp-import-item").forEach(item => {
                 item.onclick = () => {
@@ -2728,7 +2831,7 @@ function _registerBsaiPP() {
     api = window.comfyAPI?.api?.api ?? window.api;
     console.log("[BSAI Premiere Pro] Registering extension, app found, api:", !!api);
     try {
-    app.registerExtension({
+    const _bsaiExt = {
     name: "BSAI.PremierePro",
 
     async beforeRegisterNodeDef(nodeType, nodeData, appInstance) {
@@ -2820,6 +2923,7 @@ function _registerBsaiPP() {
                 </div>`;
             overlay.appendChild(dialog);
             document.body.appendChild(overlay);
+            _addMaximizeBtn(dialog);
             dialog.querySelector("[data-keep]").onclick = () => {
                 overlay.remove();
             };
@@ -3030,9 +3134,31 @@ function _registerBsaiPP() {
             }
             _checkPortConnections(this);
         };
+
+        // Mark hooks as applied so the fallback can detect
+        nodeType.prototype._bsai_hooks_applied = true;
     },
-});
+    };
+    app.registerExtension(_bsaiExt);
     console.log("[BSAI Premiere Pro] Extension registered successfully");
+
+    // Fallback: if node type was already registered before our extension
+    // loaded (e.g. script loaded late via bsai_pp_loader.js), manually
+    // apply hooks to the existing node type.
+    setTimeout(() => {
+        try {
+            const lg = window.LiteGraph;
+            if (lg && lg.registered_node_types && lg.registered_node_types[NODE_TYPE]) {
+                const nt = lg.registered_node_types[NODE_TYPE];
+                if (!nt.prototype._bsai_hooks_applied) {
+                    console.log("[BSAI Premiere Pro] Applying hooks to pre-registered node type");
+                    _bsaiExt.beforeRegisterNodeDef(nt, { name: NODE_TYPE }, app);
+                }
+            }
+        } catch (e) {
+            console.error("[BSAI Premiere Pro] Fallback hook application failed:", e);
+        }
+    }, 1500);
     } catch (e) {
         console.error("[BSAI Premiere Pro] Extension registration failed:", e);
     }

@@ -194,7 +194,7 @@ async def browse_directories(request):
             with os.scandir(p) as entries:
                 for entry in entries:
                     try:
-                        if entry.is_dir(follow_symlinks=False):
+                        if entry.is_dir():
                             dirs.append(entry.name)
                     except OSError:
                         pass
