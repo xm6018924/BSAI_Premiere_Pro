@@ -752,6 +752,10 @@ class TimelineEditor {
 
     close() {
         this._stopPlayback();
+        if (this._docKeydown) {
+            document.removeEventListener("keydown", this._docKeydown);
+            this._docKeydown = null;
+        }
         this.batchMode = false;
         this.batchSelected.clear();
         this.scissorMode = false;
@@ -850,20 +854,25 @@ class TimelineEditor {
         this.modal.querySelector('[data-act="dir-history"]').onclick = (e) => this._showDirHistory(e);
         this.modal.querySelector('[data-act="scissor"]').onclick = () => this._toggleScissorMode();
         this.modal.querySelector('[data-act="play"]').onclick = () => this._togglePlayback();
-        // Spacebar to play/pause
-        this.modal.addEventListener("keydown", (e) => {
+        // Spacebar to play/pause - listen on document, only when editor is open
+        this._docKeydown = (e) => {
+            if (!this.modal || !document.body.contains(this.modal)) return;
             if (e.key === " " || e.code === "Space") {
+                // Don't intercept when typing in input/textarea
+                const tag = e.target?.tagName?.toLowerCase();
+                if (tag === "input" || tag === "textarea" || tag === "select") return;
                 e.preventDefault();
                 this._togglePlayback();
             }
-        });
+            if (e.key === "Escape") this.close();
+        };
+        document.addEventListener("keydown", this._docKeydown);
         this.modal.querySelector('[data-act="browse-dir"]').onclick = () => this._browseDirectory();
         this.modal.querySelector('[data-act="add-vtrack"]').onclick = () => this._addVideoTrack();
         this.modal.querySelector('[data-act="add-atrack"]').onclick = () => this._addAudioTrack();
         this.modal.querySelector('[data-act="clear-all"]').onclick = () => this._clearAllClips();
         this.modal.querySelector('[data-act="batch-select"]').onclick = () => this._toggleBatchMode();
         this.modal.querySelector('[data-act="render"]').onclick = () => this._renderVideo();
-        this.modal.addEventListener("keydown", (e) => { if (e.key === "Escape") this.close(); });
     }
 
     _renderAll() {
@@ -1434,6 +1443,7 @@ class TimelineEditor {
         bar.innerHTML = `
             <span class="bsai-pp-batch-info">已选 <strong>${count}</strong> / ${total} 个片段</span>
             <button class="bsai-pp-btn" data-batch-act="select-all">${count === total ? "取消全选" : "全选"}</button>
+            <button class="bsai-pp-btn" data-batch-act="invert">🔄 反选</button>
             <button class="bsai-pp-btn bsai-pp-btn-danger" data-batch-act="delete" ${count === 0 ? "disabled" : ""}>🗑 删除选中 (${count})</button>
             <button class="bsai-pp-btn" data-batch-act="exit">退出批量</button>`;
         bar.querySelector('[data-batch-act="select-all"]').onclick = () => {
@@ -1442,6 +1452,15 @@ class TimelineEditor {
             } else {
                 for (let i = 0; i < total; i++) this.batchSelected.add(i);
             }
+            this._renderTimeline();
+            this._renderBatchBar();
+        };
+        bar.querySelector('[data-batch-act="invert"]').onclick = () => {
+            const newSel = new Set();
+            for (let i = 0; i < total; i++) {
+                if (!this.batchSelected.has(i)) newSel.add(i);
+            }
+            this.batchSelected = newSel;
             this._renderTimeline();
             this._renderBatchBar();
         };
