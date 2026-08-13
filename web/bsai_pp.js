@@ -32,20 +32,21 @@ const STYLES = `
 .bsai-pp-overlay {
     position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
     background: rgba(0,0,0,0.7); z-index: 100000;
-    display: flex; align-items: center; justify-content: center;
     font-family: -apple-system, "Segoe UI", sans-serif;
 }
 .bsai-pp-modal {
+    position: absolute;
     background: #1e1e1e; border: 1px solid #444; border-radius: 8px;
-    width: 95vw; max-width: 1400px; height: 92vh; max-height: 900px;
+    width: 95vw; height: 92vh;
     display: flex; flex-direction: column; overflow: hidden;
     box-shadow: 0 8px 32px rgba(0,0,0,0.6);
     resize: both; min-width: 600px; min-height: 400px;
+    max-width: 100vw; max-height: 100vh;
 }
 .bsai-pp-header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 10px 16px; background: #252525; border-bottom: 1px solid #3a3a3a;
-    flex-shrink: 0;
+    flex-shrink: 0; cursor: move; user-select: none;
 }
 .bsai-pp-title { color: #e0e0e0; font-size: 15px; font-weight: 600; }
 .bsai-pp-close {
@@ -120,7 +121,7 @@ const STYLES = `
 .bsai-pp-track-row {
     display: flex; border-bottom: 1px solid #111; min-height: 64px;
 }
-.bsai-pp-track-row.video-track { min-height: 130px; }
+.bsai-pp-track-row.video-track { min-height: 160px; }
 .bsai-pp-track-header {
     min-width: 150px; flex-shrink: 0; background: #2a2a2a;
     border-right: 1px solid #3a3a3a; display: flex; flex-direction: column;
@@ -143,15 +144,15 @@ const STYLES = `
     flex: 1; background: #1a1a1a; display: flex; align-items: stretch;
     gap: 0; padding: 4px 4px; overflow-x: visible; position: relative; min-height: 56px;
 }
-.bsai-pp-track-row.video-track .bsai-pp-track-content { min-height: 122px; }
+.bsai-pp-track-row.video-track .bsai-pp-track-content { min-height: 152px; }
 .bsai-pp-track-empty { color: #444; font-size: 11px; padding: 0 12px; }
 .bsai-pp-clip-block {
     border: 1px solid #3a3a3a; border-radius: 4px; height: 52px; cursor: pointer;
     overflow: hidden; position: relative; transition: border-color 0.2s, box-shadow 0.2s;
     margin: 0 1px; flex-shrink: 0; display: flex; flex-direction: column; min-width: 50px;
 }
-.bsai-pp-clip-block.video-clip { background: #2a3a4a; border-color: #3a5a7a; border-left: 3px solid #4a90d9; height: auto; }
-.bsai-pp-clip-block.audio-clip { background: #2a3a2a; border-color: #3a6a3a; border-left: 3px solid #4caf50; }
+.bsai-pp-clip-block.video-clip { background: #2a3a4a; border-color: #3a5a7a; border-left: 3px solid #4a90d9; height: 100%; }
+.bsai-pp-clip-block.audio-clip { background: #2a3a2a; border-color: #3a6a3a; border-left: 3px solid #4caf50; height: 100%; }
 .bsai-pp-clip-block.linked { border-left-color: #ffa726; }
 .bsai-pp-clip-block:hover { border-color: #6a8aaa; }
 .bsai-pp-clip-block.drag-over { border-color: #ffa726; box-shadow: 0 0 12px rgba(255,167,38,0.6); transform: scale(1.02); transition: transform 0.15s; }
@@ -172,9 +173,11 @@ const STYLES = `
     flex: 1; background: #111; display: flex; align-items: center;
     justify-content: center; overflow: hidden; position: relative; min-height: 30px;
 }
-.bsai-pp-clip-block.video-clip .bsai-pp-clip-thumb { min-height: 80px; }
-.bsai-pp-clip-thumb img { width: 100%; height: 100%; object-fit: contain; background: #000; }
+.bsai-pp-clip-block.video-clip .bsai-pp-clip-thumb { min-height: 110px; flex: 1 1 auto; }
+.bsai-pp-clip-thumb img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 .bsai-pp-clip-thumb .placeholder { color: #555; font-size: 14px; }
+.bsai-pp-clip-waveform { width: 100%; height: 100%; object-fit: cover; background: #1a2a1a; }
+.bsai-pp-clip-waveform-canvas { width: 100%; height: 100%; display: block; background: #1a2a1a; }
 .bsai-pp-clip-badge {
     position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,0.7);
     color: #aaa; font-size: 8px; padding: 1px 4px; border-radius: 2px;
@@ -382,6 +385,7 @@ const STYLES = `
     max-height: calc(100vh - 180px) !important;
 }
 .bsai-pp-modal.maximized {
+    left: 0 !important; top: 0 !important;
     width: 100vw !important; max-width: 100vw !important;
     height: 100vh !important; max-height: 100vh !important; border-radius: 0 !important;
 }
@@ -1081,6 +1085,10 @@ class TimelineEditor {
             document.removeEventListener("keydown", this._docKeydown);
             this._docKeydown = null;
         }
+        if (this._dragCleanup) {
+            this._dragCleanup();
+            this._dragCleanup = null;
+        }
         this.batchMode = false;
         this.batchSelected.clear();
         this.scissorMode = false;
@@ -1176,15 +1184,75 @@ class TimelineEditor {
             e.stopPropagation();
             const modalEl = this.modal.querySelector(".bsai-pp-modal");
             const btn = e.currentTarget;
-            modalEl.classList.toggle("maximized");
-            btn.innerHTML = modalEl.classList.contains("maximized") ? "🗗" : "⛶";
+            const isMax = modalEl.classList.toggle("maximized");
+            btn.innerHTML = isMax ? "🗗" : "⛶";
+            if (!isMax) {
+                // Restore: re-center the modal
+                modalEl.style.left = "2.5vw";
+                modalEl.style.top = "4vh";
+                modalEl.style.width = "95vw";
+                modalEl.style.height = "92vh";
+                modalEl.style.maxWidth = "100vw";
+                modalEl.style.maxHeight = "100vh";
+            }
         };
-        // Mouse wheel on header to resize modal (without Ctrl; Ctrl+wheel = timeline zoom)
+
+        // ── Window dragging via header ──
+        const modalEl = this.modal.querySelector(".bsai-pp-modal");
         const headerEl = this.modal.querySelector(".bsai-pp-header");
+        // Center the modal initially
+        modalEl.style.left = "2.5vw";
+        modalEl.style.top = "4vh";
+
+        if (headerEl && modalEl) {
+            let isDragging = false;
+            let dragStartX = 0, dragStartY = 0;
+            let modalStartLeft = 0, modalStartTop = 0;
+
+            headerEl.addEventListener("mousedown", (e) => {
+                // Don't drag when clicking buttons in the header
+                if (e.target.closest("button") || e.target.closest("[data-act]")) return;
+                if (modalEl.classList.contains("maximized")) return;
+                isDragging = true;
+                dragStartX = e.clientX;
+                dragStartY = e.clientY;
+                modalStartLeft = modalEl.offsetLeft;
+                modalStartTop = modalEl.offsetTop;
+                headerEl.style.userSelect = "none";
+                e.preventDefault();
+            });
+
+            const onMove = (e) => {
+                if (!isDragging) return;
+                const deltaX = e.clientX - dragStartX;
+                const deltaY = e.clientY - dragStartY;
+                let newLeft = modalStartLeft + deltaX;
+                let newTop = modalStartTop + deltaY;
+                // Allow some overflow but keep at least part of the header visible
+                newLeft = Math.max(-modalEl.offsetWidth + 100, Math.min(window.innerWidth - 100, newLeft));
+                newTop = Math.max(0, Math.min(window.innerHeight - 40, newTop));
+                modalEl.style.left = newLeft + "px";
+                modalEl.style.top = newTop + "px";
+            };
+
+            const onUp = () => {
+                isDragging = false;
+                headerEl.style.userSelect = "";
+            };
+
+            document.addEventListener("mousemove", onMove);
+            document.addEventListener("mouseup", onUp);
+            // Store references for cleanup on close
+            this._dragCleanup = () => {
+                document.removeEventListener("mousemove", onMove);
+                document.removeEventListener("mouseup", onUp);
+            };
+        }
+
+        // Mouse wheel on header to resize modal (without Ctrl; Ctrl+wheel = timeline zoom)
         if (headerEl) {
             headerEl.addEventListener("wheel", (e) => {
                 e.preventDefault();
-                const modalEl = this.modal.querySelector(".bsai-pp-modal");
                 if (!modalEl || modalEl.classList.contains("maximized")) return;
                 const factor = e.deltaY < 0 ? 1.05 : 0.95;
                 const curW = modalEl.offsetWidth;
@@ -2126,7 +2194,9 @@ class TimelineEditor {
             else if (!clip.audio_enabled) badges += `<span class="bsai-pp-clip-badge">🔇</span>`;
         }
         const icon = isVideo ? "🎬" : "🎵";
-        const thumbAttr = isVideo ? `data-thumb="${escapeHtml(clip.file_path)}"` : "";
+        const thumbAttr = isVideo
+            ? `data-thumb="${escapeHtml(clip.file_path)}"`
+            : `data-waveform="${escapeHtml(clip.file_path)}"`;
         const durLabel = formatTime(clipDur);
         block.innerHTML = `
             <div class="bsai-pp-clip-thumb" ${thumbAttr}>
@@ -2514,6 +2584,7 @@ class TimelineEditor {
     }
 
     async _loadThumbnails() {
+        // Load video thumbnails
         const thumbs = this.modal.querySelectorAll("[data-thumb]");
         for (const el of thumbs) {
             const path = el.getAttribute("data-thumb");
@@ -2538,6 +2609,57 @@ class TimelineEditor {
                 }
             } catch { /* ignore */ }
         }
+        // Load audio waveforms
+        if (!this.waveformCache) this.waveformCache = new Map();
+        const waveEls = this.modal.querySelectorAll("[data-waveform]");
+        for (const el of waveEls) {
+            const path = el.getAttribute("data-waveform");
+            const badges = Array.from(el.querySelectorAll(".bsai-pp-clip-badge"));
+            if (this.waveformCache.has(path)) {
+                const cached = this.waveformCache.get(path);
+                if (cached && cached.length > 0) {
+                    this._drawWaveform(el, cached, badges);
+                }
+                continue;
+            }
+            try {
+                const resp = await api.fetchApi(`/bsai_premiere_pro/waveform?file=${encodeURIComponent(path)}`);
+                const data = await resp.json();
+                if (data.waveform && data.waveform.length > 0) {
+                    this.waveformCache.set(path, data.waveform);
+                    this._drawWaveform(el, data.waveform, badges);
+                } else {
+                    this.waveformCache.set(path, null);
+                }
+            } catch { /* ignore */ }
+        }
+    }
+
+    _drawWaveform(el, samples, badges) {
+        el.innerHTML = "";
+        const canvas = document.createElement("canvas");
+        canvas.className = "bsai-pp-clip-waveform-canvas";
+        const w = el.offsetWidth || 120;
+        const h = el.offsetHeight || 50;
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#1a2a1a";
+        ctx.fillRect(0, 0, w, h);
+        const n = samples.length;
+        if (n > 0) {
+            const barW = Math.max(1, w / n);
+            const mid = h / 2;
+            ctx.fillStyle = "#4caf50";
+            for (let i = 0; i < n; i++) {
+                const amp = Math.abs(samples[i]);
+                const barH = Math.max(1, amp * mid * 0.9);
+                const x = Math.floor(i * barW);
+                ctx.fillRect(x, mid - barH, Math.max(1, barW - 0.5), barH * 2);
+            }
+        }
+        el.appendChild(canvas);
+        badges.forEach(b => el.appendChild(b));
     }
 
     _renderEditPanel() {

@@ -8,7 +8,7 @@ from aiohttp import web
 
 from .utils import (
     scan_video_directory, scan_audio_files,
-    get_video_info, generate_thumbnail,
+    get_video_info, generate_thumbnail, generate_waveform,
     process_and_merge, format_time,
     _resolve_directory,
 )
@@ -50,6 +50,23 @@ async def get_thumbnail(request):
     if thumb is None:
         return web.json_response({"error": "Failed to generate thumbnail"}, status=500)
     return web.json_response({"thumbnail": thumb})
+
+
+@PromptServer.instance.routes.get("/bsai_premiere_pro/waveform")
+async def get_waveform(request):
+    """Generate waveform amplitude data for an audio/video file."""
+    import asyncio
+    file_path = request.query.get("file", "")
+    file_path = urllib.parse.unquote(file_path)
+    if not file_path or not os.path.exists(file_path):
+        return web.json_response({"error": "File not found"}, status=404)
+    try:
+        waveform = await asyncio.to_thread(generate_waveform, file_path, 200)
+        if waveform is None:
+            return web.json_response({"error": "Failed to generate waveform"}, status=500)
+        return web.json_response({"waveform": waveform})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
 
 
 @PromptServer.instance.routes.get("/bsai_premiere_pro/audio_files")

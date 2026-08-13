@@ -167,6 +167,67 @@ def generate_thumbnail(file_path, thumb_time=None, width=160):
             pass
 
 
+def generate_waveform(file_path, num_samples=200):
+    """Generate waveform amplitude data from an audio/video file.
+
+    Returns a list of floats in [0, 1] representing normalized peak amplitudes.
+    Uses ffmpeg to downsample to mono PCM and computes per-bucket peaks.
+    """
+    ffmpeg = get_ffmpeg()
+    if not ffmpeg or not os.path.exists(file_path):
+        return None
+    try:
+        # Get duration first
+        info = get_video_info(file_path)
+        duration = info["duration"] if info else 0
+        if duration <= 0:
+            return None
+
+        # Use ffmpeg to extract raw 8-bit mono PCM at low sample rate
+        # Sample rate chosen so we get enough data points
+        sample_rate = max(800, num_samples * 4)
+        cmd = [
+            ffmpeg, "-i", file_path,
+            "-vn",  # no video
+            "-ac", "1",  # mono
+            "-ar", str(sample_rate),
+            "-f", "u8",  # unsigned 8-bit PCM
+            "-acodec", "pcm_u8",
+            "-",  # output to stdout
+        ]
+        result = subprocess.run(cmd, capture_output=True, timeout=30)
+        if result.returncode != 0:
+            return None
+
+        raw = result.stdout
+        if not raw or len(raw) < 2:
+            return None
+
+        # Convert bytes to amplitudes (unsigned 8-bit: 128 = silence)
+        # Each byte is a sample; 128 is silence
+        total_samples = len(raw)
+        bucket_size = max(1, total_samples // num_samples)
+        waveform = []
+        for i in range(num_samples):
+            start = i * bucket_size
+            end = min(start + bucket_size, total_samples)
+            if start >= end:
+                waveform.append(0.0)
+                continue
+            # Find peak amplitude in this bucket
+            peak = 0
+            for j in range(start, end):
+                val = abs(raw[j] - 128) / 128.0
+                if val > peak:
+                    peak = val
+            waveform.append(round(peak, 4))
+
+        return waveform
+    except Exception as e:
+        print(f"[BSAI Premiere Pro] Error generating waveform: {e}")
+        return None
+
+
 def _resolve_directory(directory):
     if not directory or directory.strip() == "":
         try:
