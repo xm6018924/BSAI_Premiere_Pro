@@ -268,24 +268,36 @@ const STYLES = `
 }
 /* ── Timeline playback overlay (replaces separate preview window) ── */
 .bsai-pp-timeline-preview {
-    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    background: #000; z-index: 200; display: none;
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    width: 480px; height: 270px; background: #000; z-index: 200; display: none;
     align-items: center; justify-content: center; overflow: hidden;
+    border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+    transition: width 0.3s ease, height 0.3s ease;
 }
 .bsai-pp-timeline-preview.visible { display: flex; }
+.bsai-pp-timeline-preview.fullscreen {
+    width: 100%; height: 100%; top: 0; left: 0; transform: none;
+    border-radius: 0; box-shadow: none;
+}
 .bsai-pp-timeline-preview video {
     width: 100%; height: 100%; object-fit: contain; background: #000;
 }
 .bsai-pp-timeline-preview .preview-close {
-    position: absolute; top: 8px; right: 8px; z-index: 201;
+    position: absolute; top: 6px; right: 6px; z-index: 201;
     background: rgba(0,0,0,0.7); color: #fff; border: none;
-    width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 16px;
+    width: 28px; height: 28px; border-radius: 50%; cursor: pointer; font-size: 14px;
 }
 .bsai-pp-timeline-preview .preview-close:hover { background: rgba(220,53,53,0.8); }
+.bsai-pp-timeline-preview .preview-enlarge {
+    position: absolute; top: 6px; right: 40px; z-index: 201;
+    background: rgba(0,0,0,0.7); color: #fff; border: none;
+    width: 28px; height: 28px; border-radius: 4px; cursor: pointer; font-size: 14px;
+}
+.bsai-pp-timeline-preview .preview-enlarge:hover { background: rgba(74,144,217,0.8); }
 .bsai-pp-timeline-preview .preview-info {
-    position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); z-index: 201;
-    background: rgba(0,0,0,0.75); color: #fff; padding: 6px 16px;
-    border-radius: 6px; font-size: 12px; font-family: monospace; white-space: nowrap;
+    position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%); z-index: 201;
+    background: rgba(0,0,0,0.75); color: #fff; padding: 4px 12px;
+    border-radius: 4px; font-size: 11px; font-family: monospace; white-space: nowrap;
 }
 .bsai-pp-timeline-preview .preview-progress {
     position: absolute; bottom: 0; left: 0; width: 0%; height: 3px;
@@ -1129,6 +1141,7 @@ class TimelineEditor {
                         </div>
                         <div class="bsai-pp-timeline-preview" data-timeline-preview>
                             <video data-preview-video></video>
+                            <button class="preview-enlarge" data-act="enlarge-preview" title="放大/缩小">⛶</button>
                             <button class="preview-close" data-act="close-preview">✕</button>
                             <div class="preview-info" data-preview-info></div>
                             <div class="preview-progress" data-preview-progress></div>
@@ -1156,6 +1169,12 @@ class TimelineEditor {
         this.modal.querySelector('[data-act="close-preview"]').onclick = (e) => {
             e.stopPropagation();
             this._stopPlayback();
+        };
+        this.modal.querySelector('[data-act="enlarge-preview"]').onclick = (e) => {
+            e.stopPropagation();
+            const overlay = this.modal.querySelector("[data-timeline-preview]");
+            if (overlay) overlay.classList.toggle("fullscreen");
+            e.target.textContent = overlay.classList.contains("fullscreen") ? "🗗" : "⛶";
         };
         this.modal.querySelector('[data-act="zoom-in"]').onclick = () => this._adjustZoom(1.25);
         this.modal.querySelector('[data-act="zoom-out"]').onclick = () => this._adjustZoom(0.8);
@@ -1801,6 +1820,7 @@ class TimelineEditor {
         if (videoEl) { videoEl.pause(); videoEl.removeAttribute("src"); videoEl.load(); }
         // Hide timeline preview overlay
         this.modal.querySelector("[data-timeline-preview]")?.classList.remove("visible");
+        this.modal.querySelector("[data-timeline-preview]")?.classList.remove("fullscreen");
         const btn = this.modal.querySelector("#bsai-pp-play-btn");
         if (btn) btn.textContent = "▶️ 播放";
         const progressEl = this.modal.querySelector("[data-preview-progress]");
@@ -3514,21 +3534,43 @@ function _registerBsaiPP() {
 
     // Fallback: if node type was already registered before our extension
     // loaded (e.g. script loaded late via bsai_pp_loader.js), manually
-    // apply hooks to the existing node type.
-    setTimeout(() => {
+    // apply hooks to the existing node type. Use retries for slower computers.
+    let _fallbackAttempts = 0;
+    const _fallbackInterval = setInterval(() => {
+        _fallbackAttempts++;
         try {
             const lg = window.LiteGraph;
             if (lg && lg.registered_node_types && lg.registered_node_types[NODE_TYPE]) {
                 const nt = lg.registered_node_types[NODE_TYPE];
                 if (!nt.prototype._bsai_hooks_applied) {
-                    console.log("[BSAI Premiere Pro] Applying hooks to pre-registered node type");
+                    console.log("[BSAI Premiere Pro] Applying hooks to pre-registered node type (attempt " + _fallbackAttempts + ")");
                     _bsaiExt.beforeRegisterNodeDef(nt, { name: NODE_TYPE }, app);
                 }
+                // Also resize any existing node instances on canvas
+                const canvas = app.canvas || window.canvas;
+                if (canvas && canvas.graph && canvas.graph._nodes) {
+                    for (const node of canvas.graph._nodes) {
+                        if (node.type === NODE_TYPE) {
+                            // Force resize to show buttons
+                            requestAnimationFrame(() => {
+                                const computed = node.computeSize();
+                                node.setSize([Math.max(420, computed[0]), Math.max(computed[1], 260)]);
+                                node.setDirtyCanvas(true, true);
+                            });
+                        }
+                    }
+                }
+                clearInterval(_fallbackInterval);
+                console.log("[BSAI Premiere Pro] Fallback completed successfully");
             }
         } catch (e) {
-            console.error("[BSAI Premiere Pro] Fallback hook application failed:", e);
+            console.error("[BSAI Premiere Pro] Fallback attempt " + _fallbackAttempts + " failed:", e);
         }
-    }, 1500);
+        if (_fallbackAttempts >= 30) { // 30 * 500ms = 15 seconds max
+            clearInterval(_fallbackInterval);
+            console.error("[BSAI Premiere Pro] Fallback: max attempts (30) reached. Node type '" + NODE_TYPE + "' not found.");
+        }
+    }, 500);
     } catch (e) {
         console.error("[BSAI Premiere Pro] Extension registration failed:", e);
     }

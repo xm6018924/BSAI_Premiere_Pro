@@ -249,7 +249,23 @@ async def browse_files(request):
     ALL_EXTS = VIDEO_EXTS | AUDIO_EXTS | IMAGE_EXTS
 
     def _scan_files(p):
-        if not p or not os.path.exists(p):
+        if not p or p == "":
+            # Empty path: show drives (Windows) or root (Unix), same as directory browser
+            if os.name == "nt":
+                import ctypes
+                buf = ctypes.create_unicode_buffer(1024)
+                buf_len = ctypes.windll.kernel32.GetLogicalDriveStringsW(
+                    ctypes.sizeof(buf) // 2, buf
+                )
+                drives = []
+                for i in range(0, buf_len, 4):
+                    d = buf[i:i+3]
+                    if d and len(d) == 3 and d[1] == ":":
+                        drives.append(d)
+                return {"path": "", "parent": "", "dirs": drives, "files": [], "is_root": True, "count": len(drives)}, None
+            else:
+                p = "/"
+        if not os.path.exists(p):
             return None, f"路径不存在: {p}"
         if not os.path.isdir(p):
             return None, f"不是目录: {p}"
