@@ -1717,13 +1717,23 @@ class TimelineEditor {
             this._toast("时间轴上没有可播放的视频片段", "error");
             return;
         }
+        // If resuming from pause, just resume the current video
+        if (this._playClipIndex > 0 && this._playClipIndex < videoClips.length && this._playClips === videoClips) {
+            const inlineVideo = this.modal.querySelector(".bsai-pp-inline-video");
+            if (inlineVideo) {
+                this._isPlaying = true;
+                const btn = this.modal.querySelector("#bsai-pp-play-btn");
+                if (btn) btn.textContent = "⏸️ 暂停";
+                inlineVideo.play().catch(() => {});
+                return;
+            }
+        }
         this._playClips = videoClips;
         this._playClipIndex = 0;
         this._isPlaying = true;
         const btn = this.modal.querySelector("#bsai-pp-play-btn");
         if (btn) btn.textContent = "⏸️ 暂停";
-        // Show timeline preview overlay (fills the entire timeline area)
-        this.modal.querySelector("[data-timeline-preview]")?.classList.add("visible");
+        // Play inline on timeline - NO popup window
         this._playNextClip();
     }
 
@@ -1733,60 +1743,76 @@ class TimelineEditor {
             return;
         }
         const clip = this._playClips[this._playClipIndex];
-        const videoEl = this.modal.querySelector("[data-preview-video]");
-        if (!videoEl) { this._stopPlayback(); return; }
-
         const filePath = clip.file_path || "";
         const trimStart = clip.trim_start || 0;
         const trimEnd = clip.trim_end || clip.duration || 0;
         const videoSrc = `/bsai_premiere_pro/stream?file=${encodeURIComponent(filePath)}`;
 
-        // Clean up previous event listeners
-        videoEl.onloadedmetadata = null;
-        videoEl.ontimeupdate = null;
-        videoEl.onended = null;
+        // Remove any previous inline video
+        this.modal.querySelectorAll(".bsai-pp-inline-video").forEach(v => v.remove());
 
-        videoEl.src = videoSrc;
+        // Find the clip block element on the timeline
+        const clipIdx = this.td.clips.indexOf(clip);
+        const clipBlock = this.modal.querySelector(`[data-clip-idx="${clipIdx}"]`);
+        const thumbDiv = clipBlock?.querySelector(".bsai-pp-clip-thumb");
 
-        // Apply alignment: object-fit based on align_mode
-        const alignMode = this.td.align_mode || "height";
-        // For mixed aspect ratios: height-align = fill height (object-fit: contain),
-        // width-align = fill width (object-fit: cover would crop, so use contain + transform)
-        videoEl.style.objectFit = "contain";
-        // Apply manual position offset (pos_x, pos_y are -100 to 100)
+        if (!thumbDiv) {
+            // Fallback: if clip block not found, skip to next
+            this._playClipIndex++;
+            this._playNextClip();
+            return;
+        }
+
+        // Create inline video element inside the clip block's thumbnail
+        const video = document.createElement("video");
+        video.className = "bsai-pp-inline-video";
+        video.style.cssText = "width:100%;height:100%;object-fit:contain;position:absolute;top:0;left:0;background:#000;z-index:5;";
+        video.src = videoSrc;
+        thumbDiv.appendChild(video);
+
+        // Apply position offset
         const posX = clip.pos_x ?? 0;
         const posY = clip.pos_y ?? 0;
-        videoEl.style.transform = `translate(${posX}%, ${posY}%)`;
+        video.style.transform = `translate(${posX}%, ${posY}%)`;
 
-        videoEl.onloadedmetadata = () => {
-            if (trimStart > 0) {
-                try { videoEl.currentTime = trimStart; } catch {}
-            }
-            videoEl.play().catch(() => {});
-        };
+        // Scroll to show current clip
+        if (clipBlock) {
+            clipBlock.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+        }
 
-        // Update preview info and progress bar
-        const infoEl = this.modal.querySelector("[data-preview-info]");
-        const progressEl = this.modal.querySelector("[data-preview-progress]");
+        // Update playhead position
+        this._updatePlayhead(clip);
+
         const clipDur = trimEnd - trimStart;
 
-        // Stop at trim_end
-        videoEl.ontimeupdate = () => {
-            if (trimEnd > 0 && videoEl.currentTime >= trimEnd) {
-                videoEl.pause();
-                videoEl.onended?.();
+        video.onloadedmetadata = () => {
+            if (trimStart > 0) {
+                try { video.currentTime = trimStart; } catch {}
             }
-            // Update progress bar
-            if (progressEl && clipDur > 0) {
-                const elapsed = Math.max(0, videoEl.currentTime - trimStart);
-                const pct = Math.min(100, (elapsed / clipDur) * 100);
-                progressEl.style.width = pct + "%";
+            video.play().catch(() => {});
+        };
+
+        video.ontimeupdate = () => {
+            if (trimEnd > 0 && video.currentTime >= trimEnd) {
+                video.pause();
+                video.onended?.();
+                return;
             }
-            // Update info text
-            if (infoEl) {
-                const elapsed = Math.max(0, videoEl.currentTime - trimStart);
-                infoEl.textContent = `▶ ${clip.file_name || ""} | ${formatTime(elapsed)} / ${formatTime(clipDur)} | ${this._playClipIndex + 1}/${this._playClips.length}`;
+            // Animate playhead
+            this._animatePlayhead();
+            // Update footer info
+            const footerInfo = this.modal.querySelector("[data-footer-info]");
+            if (footerInfo) {
+                const elapsed = Math.max(0, video.currentTime - trimStart);
+                footerInfo.textContent = `▶ ${clip.file_name || ""} | ${formatTime(elapsed)} / ${formatTime(clipDur)} | ${this._playClipIndex + 1}/${this._playClips.length}`;
             }
+        };
+
+        video.onended = () => {
+            // Remove inline video from current clip
+            video.remove();
+            this._playClipIndex++;
+            this._playNextClip();
         };
 
         // Show clip info in footer
@@ -1794,17 +1820,12 @@ class TimelineEditor {
         if (footerInfo) {
             footerInfo.textContent = `▶ 播放中: ${clip.file_name} (${this._playClipIndex + 1}/${this._playClips.length})`;
         }
-
-        videoEl.onended = () => {
-            this._playClipIndex++;
-            this._playNextClip();
-        };
     }
 
     _pausePlayback() {
         this._isPlaying = false;
-        const videoEl = this.modal.querySelector("[data-preview-video]");
-        if (videoEl) videoEl.pause();
+        const inlineVideo = this.modal.querySelector(".bsai-pp-inline-video");
+        if (inlineVideo) inlineVideo.pause();
         const btn = this.modal.querySelector("#bsai-pp-play-btn");
         if (btn) btn.textContent = "▶️ 播放";
         const footerInfo = this.modal.querySelector("[data-footer-info]");
@@ -1816,15 +1837,15 @@ class TimelineEditor {
     _stopPlayback() {
         this._isPlaying = false;
         this._playClipIndex = 0;
-        const videoEl = this.modal.querySelector("[data-preview-video]");
-        if (videoEl) { videoEl.pause(); videoEl.removeAttribute("src"); videoEl.load(); }
-        // Hide timeline preview overlay
+        // Remove all inline videos from clip blocks
+        this.modal.querySelectorAll(".bsai-pp-inline-video").forEach(v => { v.pause(); v.remove(); });
+        // Remove playhead
+        this._removePlayhead();
+        // Hide overlay if it was shown via enlarge
         this.modal.querySelector("[data-timeline-preview]")?.classList.remove("visible");
         this.modal.querySelector("[data-timeline-preview]")?.classList.remove("fullscreen");
         const btn = this.modal.querySelector("#bsai-pp-play-btn");
         if (btn) btn.textContent = "▶️ 播放";
-        const progressEl = this.modal.querySelector("[data-preview-progress]");
-        if (progressEl) progressEl.style.width = "0%";
         const footerInfo = this.modal.querySelector("[data-footer-info]");
         if (footerInfo) footerInfo.textContent = "";
     }
@@ -1850,7 +1871,7 @@ class TimelineEditor {
     _animatePlayhead() {
         const playhead = this.modal.querySelector(".bsai-pp-playhead");
         if (!playhead || !this._isPlaying) return;
-        const videoEl = this.modal.querySelector("[data-preview-video]");
+        const videoEl = this.modal.querySelector(".bsai-pp-inline-video");
         if (!videoEl) return;
         const pps = this._pps || 15;
         let accTime = 0;
