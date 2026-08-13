@@ -1812,12 +1812,7 @@ class TimelineEditor {
 
     _startPlayback() {
         const videoClips = (this.td.clips || [])
-            .filter(c => c.track_type === "video" && c.video_enabled !== false)
-            .sort((a, b) => {
-                const aStart = (a.trim_start || 0);
-                const bStart = (b.trim_start || 0);
-                return aStart - bStart;
-            });
+            .filter(c => c.track_type === "video" && c.video_enabled !== false);
         if (videoClips.length === 0) {
             this._toast("时间轴上没有可播放的视频片段", "error");
             return;
@@ -1854,7 +1849,7 @@ class TimelineEditor {
         const videoSrc = `/bsai_premiere_pro/stream?file=${encodeURIComponent(filePath)}`;
 
         // Remove any previous inline video
-        this.modal.querySelectorAll(".bsai-pp-inline-video").forEach(v => v.remove());
+        this.modal.querySelectorAll(".bsai-pp-inline-video").forEach(v => { v.pause(); v.remove(); });
 
         // Find the clip block element on the timeline
         const clipIdx = this.td.clips.indexOf(clip);
@@ -1890,6 +1885,23 @@ class TimelineEditor {
 
         const clipDur = trimEnd - trimStart;
 
+        // Guard flag: ensure onEnded only fires once per video
+        let clipEnded = false;
+        const advanceToNext = () => {
+            if (clipEnded) return;
+            clipEnded = true;
+            // Detach all handlers to prevent any further callbacks
+            video.onended = null;
+            video.ontimeupdate = null;
+            video.onloadedmetadata = null;
+            // Remove this video element
+            video.pause();
+            video.remove();
+            // Advance to next clip
+            this._playClipIndex++;
+            this._playNextClip();
+        };
+
         video.onloadedmetadata = () => {
             if (trimStart > 0) {
                 try { video.currentTime = trimStart; } catch {}
@@ -1899,8 +1911,7 @@ class TimelineEditor {
 
         video.ontimeupdate = () => {
             if (trimEnd > 0 && video.currentTime >= trimEnd) {
-                video.pause();
-                video.onended?.();
+                advanceToNext();
                 return;
             }
             // Animate playhead
@@ -1914,10 +1925,7 @@ class TimelineEditor {
         };
 
         video.onended = () => {
-            // Remove inline video from current clip
-            video.remove();
-            this._playClipIndex++;
-            this._playNextClip();
+            advanceToNext();
         };
 
         // Show clip info in footer
