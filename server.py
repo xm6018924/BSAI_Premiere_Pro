@@ -62,6 +62,52 @@ async def list_audio_files(request):
         return web.json_response({"files": [], "error": str(e)}, status=500)
 
 
+@PromptServer.instance.routes.get("/bsai_premiere_pro/stream")
+async def stream_video(request):
+    """Stream a video file for timeline playback with Range support."""
+    file_path = request.query.get("file", "")
+    file_path = urllib.parse.unquote(file_path)
+    if not file_path or not os.path.exists(file_path):
+        return web.Response(status=404, text="File not found")
+
+    file_size = os.path.getsize(file_path)
+    range_header = request.headers.get("Range")
+
+    if range_header:
+        # Parse Range header: bytes=start-end
+        import re
+        m = re.match(r"bytes=(\d+)-(\d*)", range_header)
+        if m:
+            start = int(m.group(1))
+            end = int(m.group(2)) if m.group(2) else file_size - 1
+            chunk_size = end - start + 1
+            with open(file_path, "rb") as f:
+                f.seek(start)
+                chunk = f.read(chunk_size)
+            return web.Response(
+                body=chunk,
+                status=206,
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Accept-Ranges": "bytes",
+                    "Content-Length": str(chunk_size),
+                    "Content-Type": "video/mp4",
+                },
+            )
+
+    # No Range header - serve entire file
+    with open(file_path, "rb") as f:
+        data = f.read()
+    return web.Response(
+        body=data,
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+            "Content-Type": "video/mp4",
+        },
+    )
+
+
 @PromptServer.instance.routes.post("/bsai_premiere_pro/render")
 async def render_video(request):
     try:

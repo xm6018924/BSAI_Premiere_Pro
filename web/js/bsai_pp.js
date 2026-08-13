@@ -156,6 +156,13 @@ const STYLES = `
 .bsai-pp-clip-block.drag-over { border-color: #ffa726; box-shadow: 0 0 12px rgba(255,167,38,0.6); transform: scale(1.02); transition: transform 0.15s; }
 .bsai-pp-clip-block[draggable="true"] { cursor: grab; }
 .bsai-pp-clip-block[draggable="true"]:active { cursor: grabbing; }
+.bsai-pp-playhead {
+    position: absolute; top: 0; bottom: 0; width: 2px; background: #ff4444;
+    z-index: 100; pointer-events: none; box-shadow: 0 0 6px rgba(255,68,68,0.8);
+}
+.bsai-pp-playhead::before {
+    content: "▼"; position: absolute; top: -2px; left: -6px; color: #ff4444; font-size: 10px;
+}
 .bsai-pp-clip-block.selected { border-color: #4a90d9; box-shadow: 0 0 8px rgba(74,144,217,0.5); }
 .bsai-pp-clip-block.batch-selected { border-color: #ff6b6b; box-shadow: 0 0 8px rgba(255,107,107,0.6); background: rgba(255,107,107,0.12); }
 .bsai-pp-clip-block.batch-selected::after { content: "✓"; position: absolute; top: 2px; right: 4px; color: #ff6b6b; font-weight: bold; font-size: 12px; }
@@ -631,10 +638,14 @@ class AutoImporter {
         const vClips = td.clips.filter(c => c.track_type === "video" || !c.track_type);
         const count = vClips.length;
         const total = vClips.reduce((s, c) => s + (c.trim_end - c.trim_start), 0);
+        // Check port connection state for mode label
+        const imageConnected = this.node.inputs?.some(i => i.name === "image" && i.link != null);
+        const audioConnected = this.node.inputs?.some(i => i.name === "audio" && i.link != null);
+        const modeLabel = (imageConnected && audioConnected) ? "⚡自动" : "✋手动";
         if (count > 0) {
-            this.node.title = `🎬 BSAI Premiere Pro (${count} clips / ${formatTime(total)})`;
+            this.node.title = `🎬 BSAI Premiere Pro (${count} clips / ${formatTime(total)}) [${modeLabel}]`;
         } else {
-            this.node.title = `🎬 BSAI Premiere Pro`;
+            this.node.title = `🎬 BSAI Premiere Pro [${modeLabel}]`;
         }
         this.node.setDirtyCanvas(true, true);
     }
@@ -740,6 +751,7 @@ class TimelineEditor {
     }
 
     close() {
+        this._stopPlayback();
         this.batchMode = false;
         this.batchSelected.clear();
         this.scissorMode = false;
@@ -786,6 +798,7 @@ class TimelineEditor {
                     <button class="bsai-pp-btn" data-act="import-external">📂 添加外部文件</button>
                     <button class="bsai-pp-btn" data-act="dir-history">📚 历史目录</button>
                     <button class="bsai-pp-btn" data-act="scissor" id="bsai-pp-scissor-btn">✂️ 剪刀</button>
+                    <button class="bsai-pp-btn" data-act="play" id="bsai-pp-play-btn">▶️ 播放</button>
                     <button class="bsai-pp-btn" data-act="add-vtrack">＋ 视频轨道</button>
                     <button class="bsai-pp-btn" data-act="add-atrack">＋ 音频轨道</button>
                     <button class="bsai-pp-btn bsai-pp-btn-danger" data-act="clear-all">🗑 清空全部</button>
@@ -836,6 +849,14 @@ class TimelineEditor {
         this.modal.querySelector('[data-act="import-external"]').onclick = () => this._importExternalFiles();
         this.modal.querySelector('[data-act="dir-history"]').onclick = (e) => this._showDirHistory(e);
         this.modal.querySelector('[data-act="scissor"]').onclick = () => this._toggleScissorMode();
+        this.modal.querySelector('[data-act="play"]').onclick = () => this._togglePlayback();
+        // Spacebar to play/pause
+        this.modal.addEventListener("keydown", (e) => {
+            if (e.key === " " || e.code === "Space") {
+                e.preventDefault();
+                this._togglePlayback();
+            }
+        });
         this.modal.querySelector('[data-act="browse-dir"]').onclick = () => this._browseDirectory();
         this.modal.querySelector('[data-act="add-vtrack"]').onclick = () => this._addVideoTrack();
         this.modal.querySelector('[data-act="add-atrack"]').onclick = () => this._addAudioTrack();
@@ -1223,6 +1244,154 @@ class TimelineEditor {
         }
         this._renderTimeline();
         this._toast(this.scissorMode ? "剪刀模式已开启，点击片段进行分割" : "剪刀模式已关闭", this.scissorMode ? "info" : "success");
+    }
+
+    _togglePlayback() {
+        if (this._isPlaying) {
+            this._pausePlayback();
+        } else {
+            this._startPlayback();
+        }
+    }
+
+    _startPlayback() {
+        const videoClips = (this.td.clips || [])
+            .filter(c => c.track_type === "video" && c.video_enabled !== false)
+            .sort((a, b) => {
+                const aStart = (a.trim_start || 0);
+                const bStart = (b.trim_start || 0);
+                return aStart - bStart;
+            });
+        if (videoClips.length === 0) {
+            this._toast("时间轴上没有可播放的视频片段", "error");
+            return;
+        }
+        this._playClips = videoClips;
+        this._playClipIndex = this._playClipIndex || 0;
+        if (this._playClipIndex >= videoClips.length) this._playClipIndex = 0;
+        this._isPlaying = true;
+        const btn = this.modal.querySelector("#bsai-pp-play-btn");
+        if (btn) btn.textContent = "⏸️ 暂停";
+        this._playNextClip();
+    }
+
+    _playNextClip() {
+        if (!this._isPlaying || this._playClipIndex >= this._playClips.length) {
+            this._stopPlayback();
+            return;
+        }
+        const clip = this._playClips[this._playClipIndex];
+        const videoEl = this.modal.querySelector("[data-preview-video]");
+        if (!videoEl) { this._stopPlayback(); return; }
+
+        const filePath = clip.file_path || "";
+        const trimStart = clip.trim_start || 0;
+        const trimEnd = clip.trim_end || clip.duration || 0;
+        const videoSrc = `/bsai_premiere_pro/stream?file=${encodeURIComponent(filePath)}`;
+
+        // Clean up previous event listeners
+        videoEl.onloadedmetadata = null;
+        videoEl.ontimeupdate = null;
+        videoEl.onended = null;
+
+        videoEl.src = videoSrc;
+
+        videoEl.onloadedmetadata = () => {
+            if (trimStart > 0) {
+                try { videoEl.currentTime = trimStart; } catch {}
+            }
+            videoEl.play().catch(() => {});
+        };
+
+        // Stop at trim_end
+        videoEl.ontimeupdate = () => {
+            if (trimEnd > 0 && videoEl.currentTime >= trimEnd) {
+                videoEl.pause();
+                videoEl.onended?.();
+            }
+            // Animate playhead
+            this._animatePlayhead();
+        };
+
+        // Show clip info in footer
+        const footerInfo = this.modal.querySelector("[data-footer-info]");
+        if (footerInfo) {
+            footerInfo.textContent = `▶ 播放中: ${clip.file_name} (${this._playClipIndex + 1}/${this._playClips.length})`;
+        }
+
+        // Set up playhead
+        this._updatePlayhead(clip);
+
+        videoEl.onended = () => {
+            this._playClipIndex++;
+            this._playNextClip();
+        };
+    }
+
+    _pausePlayback() {
+        this._isPlaying = false;
+        const videoEl = this.modal.querySelector("[data-preview-video]");
+        if (videoEl) videoEl.pause();
+        const btn = this.modal.querySelector("#bsai-pp-play-btn");
+        if (btn) btn.textContent = "▶️ 播放";
+        const footerInfo = this.modal.querySelector("[data-footer-info]");
+        if (footerInfo) {
+            footerInfo.textContent = `⏸ 已暂停 (${this._playClipIndex + 1}/${this._playClips?.length || 0})`;
+        }
+    }
+
+    _stopPlayback() {
+        this._isPlaying = false;
+        this._playClipIndex = 0;
+        const videoEl = this.modal.querySelector("[data-preview-video]");
+        if (videoEl) { videoEl.pause(); videoEl.removeAttribute("src"); videoEl.load(); }
+        const btn = this.modal.querySelector("#bsai-pp-play-btn");
+        if (btn) btn.textContent = "▶️ 播放";
+        this._removePlayhead();
+        const footerInfo = this.modal.querySelector("[data-footer-info]");
+        if (footerInfo) footerInfo.textContent = "";
+    }
+
+    _updatePlayhead(clip) {
+        const container = this.modal.querySelector("[data-track-container]");
+        if (!container) return;
+        this._removePlayhead();
+        // Calculate playhead X position based on accumulated time before this clip
+        const pps = this._pps || 15;
+        let accTime = 0;
+        for (let i = 0; i < this._playClipIndex; i++) {
+            const c = this._playClips[i];
+            accTime += (c.trim_end - c.trim_start) || 0;
+        }
+        const x = accTime * pps;
+        const playhead = document.createElement("div");
+        playhead.className = "bsai-pp-playhead";
+        playhead.style.left = x + "px";
+        container.appendChild(playhead);
+    }
+
+    _animatePlayhead() {
+        const playhead = this.modal.querySelector(".bsai-pp-playhead");
+        if (!playhead || !this._isPlaying) return;
+        const videoEl = this.modal.querySelector("[data-preview-video]");
+        if (!videoEl) return;
+        const pps = this._pps || 15;
+        let accTime = 0;
+        for (let i = 0; i < this._playClipIndex; i++) {
+            const c = this._playClips[i];
+            accTime += (c.trim_end - c.trim_start) || 0;
+        }
+        const currentClip = this._playClips[this._playClipIndex];
+        if (!currentClip) return;
+        const trimStart = currentClip.trim_start || 0;
+        const elapsedInClip = Math.max(0, videoEl.currentTime - trimStart);
+        const x = (accTime + elapsedInClip) * pps;
+        playhead.style.left = x + "px";
+    }
+
+    _removePlayhead() {
+        const existing = this.modal.querySelector(".bsai-pp-playhead");
+        if (existing) existing.remove();
     }
 
     _toggleBatchMode() {
@@ -2575,6 +2744,78 @@ function _registerBsaiPP() {
             });
         }
 
+        // Check if image and audio input ports are both connected
+        function _checkPortConnections(node) {
+            const imageConnected = node.inputs?.some(i => i.name === "image" && i.link != null);
+            const audioConnected = node.inputs?.some(i => i.name === "audio" && i.link != null);
+            const bothConnected = !!(imageConnected && audioConnected);
+
+            // Update node title to show mode
+            const importer = importerMap.get(node.id);
+            if (importer) {
+                try {
+                    const td = JSON.parse(node.properties?.bsai_td || '{"clips":[]}');
+                    const clipCount = (td.clips || []).filter(c => c.track_type === "video").length;
+                    const modeLabel = bothConnected ? "⚡自动" : "✋手动";
+                    const dur = td.clips?.length > 0
+                        ? formatTime(td.clips.filter(c => c.track_type === "video").reduce((s, c) => s + (c.trim_end - c.trim_start), 0))
+                        : "00:00.00";
+                    node.title = `🎬 BSAI Premiere Pro (${clipCount} clips / ${dur}) [${modeLabel}]`;
+                } catch {}
+            }
+
+            // Only show dialog when transitioning to "both connected" state
+            if (bothConnected && !node._bsaiBothConnected) {
+                node._bsaiBothConnected = true;
+                if (importer) {
+                    const clips = importer.td?.clips || [];
+                    if (clips.length > 0) {
+                        _showClearTimelineDialog(node, importer);
+                    }
+                }
+            } else if (!bothConnected) {
+                node._bsaiBothConnected = false;
+            }
+        }
+
+        function _showClearTimelineDialog(node, importer) {
+            const clips = importer.td?.clips || [];
+            const vCount = clips.filter(c => c.track_type === "video").length;
+            const aCount = clips.filter(c => c.track_type === "audio").length;
+            const overlay = document.createElement("div");
+            overlay.className = "bsai-pp-dialog-overlay";
+            const dialog = document.createElement("div");
+            dialog.className = "bsai-pp-import-dialog";
+            dialog.style.minWidth = "400px";
+            dialog.innerHTML = `
+                <h3>🔌 检测到 Image + Audio 已连接</h3>
+                <div style="color:#ccc;font-size:13px;padding:10px 0;line-height:1.6;">
+                    节点已切换为<b style="color:#4a90d9;">自动合并模式</b>。<br>
+                    时间轴上已有 <b style="color:#ffa726;">${vCount}</b> 个视频片段和 <b style="color:#4caf50;">${aCount}</b> 个音频片段。<br>
+                    <span style="color:#ff9800;">是否删除时间轴上的现有文件？</span><br>
+                    <span style="color:#888;font-size:12px;">删除后将从头开始按时间顺序自动合并新文件。</span>
+                </div>
+                <div style="display:flex;gap:8px;justify-content:flex-end;">
+                    <button class="bsai-pp-btn" data-keep>保留现有文件</button>
+                    <button class="bsai-pp-btn bsai-pp-btn-danger" data-clear>删除现有文件</button>
+                </div>`;
+            overlay.appendChild(dialog);
+            document.body.appendChild(overlay);
+            dialog.querySelector("[data-keep]").onclick = () => {
+                overlay.remove();
+            };
+            dialog.querySelector("[data-clear]").onclick = () => {
+                // Clear timeline
+                importer.td.clips = [];
+                importer.td.known_files = [];
+                importer.td.deleted_files = [];
+                importer._save();
+                const editor = importer._editor;
+                if (editor) editor.refresh();
+                overlay.remove();
+            };
+        }
+
         // ── Draw buttons on canvas via onDrawForeground ──
         const oldDrawFg = nodeType.prototype.onDrawForeground;
         nodeType.prototype.onDrawForeground = function (ctx) {
@@ -2696,6 +2937,14 @@ function _registerBsaiPP() {
         nodeType.prototype.onAdded = function () {
             onAdded?.apply(this, arguments);
             _forceResize(this);
+            _checkPortConnections(this);
+        };
+
+        // Detect when image/audio ports are connected/disconnected
+        const onConnectionsChange = nodeType.prototype.onConnectionsChange;
+        nodeType.prototype.onConnectionsChange = function (side, slot, connected, link, input) {
+            onConnectionsChange?.apply(this, arguments);
+            _checkPortConnections(this);
         };
 
         const onRemoved = nodeType.prototype.onRemoved;
@@ -2730,6 +2979,7 @@ function _registerBsaiPP() {
                 } catch {}
             }
             _forceResize(this);
+            _checkPortConnections(this);
             return result;
         };
 
@@ -2759,6 +3009,7 @@ function _registerBsaiPP() {
                 const editor = importerMap.get(this.id)?._editor;
                 if (editor) editor._toast(msgStr, "info");
             }
+            _checkPortConnections(this);
         };
     },
 });
