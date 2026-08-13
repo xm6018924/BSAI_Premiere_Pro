@@ -17,7 +17,7 @@
         window.__bsai_pp_script_injected = true;
 
         var script = document.createElement("script");
-        script.src = "/extensions/BSAI_Premiere_Pro/js/bsai_pp.js?v=" + Date.now();
+        script.src = "/extensions/BSAI_Premiere_Pro/bsai_pp.js?v=" + Date.now();
         script.onerror = function () {
             window.__bsai_pp_script_injected = false;
             console.error("[BSAI Premiere Pro] Failed to load bsai_pp.js");

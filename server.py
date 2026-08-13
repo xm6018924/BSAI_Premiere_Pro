@@ -179,7 +179,7 @@ async def browse_directories(request):
                     d = buf[i:i+3]
                     if d and len(d) == 3 and d[1] == ":":
                         drives.append(d)
-                return {"path": "", "parent": "", "dirs": drives, "is_root": True}, None
+                return {"path": "", "parent": "", "dirs": drives, "is_root": True, "count": len(drives)}, None
             else:
                 p = "/"
         if not os.path.exists(p):
@@ -190,31 +190,99 @@ async def browse_directories(request):
         if parent == p:
             parent = ""
         dirs = []
+        errors = []
         try:
             with os.scandir(p) as entries:
                 for entry in entries:
                     try:
                         if entry.is_dir():
                             dirs.append(entry.name)
-                    except OSError:
-                        pass
+                    except OSError as e:
+                        errors.append(f"{entry.name}: {e}")
         except PermissionError:
-            pass
+            errors.append("Permission denied")
+        except Exception as e:
+            errors.append(str(e))
         dirs.sort()
-        return {"path": p, "parent": parent, "dirs": dirs}, None
+        return {"path": p, "parent": parent, "dirs": dirs, "is_root": False, "count": len(dirs), "errors": errors}, None
 
     resolved = _resolve_directory(path) if path else ""
 
     try:
         result, error = await asyncio.wait_for(
             asyncio.to_thread(_scan_dir, resolved),
-            timeout=10.0
+            timeout=30.0
         )
         if error:
             return web.json_response({"error": error, "path": path}, status=400)
         return web.json_response(result)
     except asyncio.TimeoutError:
-        return web.json_response({"error": f"目录扫描超时: {path}", "path": path}, status=504)
+        return web.json_response({"error": f"目录扫描超时(30s): {path}", "path": path}, status=504)
+    except Exception as e:
+        return web.json_response({"error": str(e), "path": path}, status=500)
+
+
+@PromptServer.instance.routes.get("/bsai_premiere_pro/browse_files")
+async def browse_files(request):
+    """Browse files (video/audio/image) in a directory."""
+    import asyncio
+    raw_path = request.query.get("path", "")
+    path = urllib.parse.unquote(raw_path)
+
+    VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".wmv", ".m4v"}
+    AUDIO_EXTS = {".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".wma"}
+    IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tiff"}
+    ALL_EXTS = VIDEO_EXTS | AUDIO_EXTS | IMAGE_EXTS
+
+    def _scan_files(p):
+        if not p or not os.path.exists(p):
+            return None, f"路径不存在: {p}"
+        if not os.path.isdir(p):
+            return None, f"不是目录: {p}"
+        parent = os.path.dirname(p.rstrip(os.sep)) or p
+        if parent == p:
+            parent = ""
+        dirs = []
+        files = []
+        try:
+            with os.scandir(p) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir():
+                            dirs.append(entry.name)
+                        elif entry.is_file():
+                            ext = os.path.splitext(entry.name)[1].lower()
+                            if ext in ALL_EXTS:
+                                stat = entry.stat()
+                                file_type = "video" if ext in VIDEO_EXTS else \
+                                           "audio" if ext in AUDIO_EXTS else "image"
+                                files.append({
+                                    "name": entry.name,
+                                    "path": os.path.join(p, entry.name),
+                                    "size": stat.st_size,
+                                    "type": file_type,
+                                    "ext": ext,
+                                })
+                    except OSError:
+                        pass
+        except PermissionError:
+            pass
+        dirs.sort()
+        files.sort(key=lambda f: f["name"])
+        return {"path": p, "parent": parent, "dirs": dirs, "files": files}, None
+
+    resolved = _resolve_directory(path) if path else ""
+
+    try:
+        result, error = await asyncio.wait_for(
+            asyncio.to_thread(_scan_files, resolved),
+            timeout=30.0
+        )
+        if error:
+            return web.json_response({"error": error, "path": path}, status=400)
+        return web.json_response(result)
+    except asyncio.TimeoutError:
+        return web.json_response({"error": f"文件扫描超时(30s): {path}", "path": path}, status=504)
     except Exception as e:
         return web.json_response({"error": str(e), "path": path}, status=500)
 

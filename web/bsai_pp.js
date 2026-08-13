@@ -550,6 +550,10 @@ function browseDirectoryDialog(initialPath) {
                 if (manualInput && !manualInput.value && currentPath) manualInput.value = currentPath;
                 else if (manualInput && currentPath) manualInput.value = currentPath;
                 listEl.innerHTML = "";
+                const countEl = document.createElement("div");
+                countEl.style.cssText = "color:#888;font-size:11px;padding:4px 10px;border-bottom:1px solid #333;margin-bottom:4px;";
+                countEl.textContent = `共 ${data.dirs.length} 个子目录${data.errors?.length ? ` (${data.errors.length} 个无法访问)` : ""}`;
+                listEl.appendChild(countEl);
                 if (data.dirs.length === 0) {
                     listEl.innerHTML = `<div style="color:#666;padding:10px;">📂 没有子目录</div>`;
                 }
@@ -602,6 +606,199 @@ function browseDirectoryDialog(initialPath) {
             const manualVal = manualInput.value.trim();
             overlay.remove();
             resolve(manualVal || currentPath);
+        };
+    });
+}
+
+// ── File browser dialog (select actual files, not directories) ──────
+function browseFilesDialog(initialPath) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement("div");
+        overlay.className = "bsai-pp-dialog-overlay";
+        const dialog = document.createElement("div");
+        dialog.className = "bsai-pp-import-dialog";
+        dialog.style.minWidth = "640px";
+        dialog.innerHTML = `
+            <h3>📂 选择文件（视频/音频/图片）</h3>
+            <div class="bsai-pp-breadcrumb" data-breadcrumb></div>
+            <div style="display:flex;gap:6px;margin-bottom:8px;">
+                <input type="text" data-manual-path style="flex:1;background:#1a1a1a;border:1px solid #444;color:#e0e0e0;padding:5px 8px;border-radius:4px;font-size:12px;" placeholder="输入路径后回车前往">
+                <button class="bsai-pp-btn" data-act="go">前往</button>
+                <button class="bsai-pp-btn" data-act="up">⬆ 上级</button>
+            </div>
+            <div class="bsai-pp-import-list" data-file-list></div>
+            <div style="display:flex;gap:8px;justify-content:space-between;margin-top:8px;align-items:center;">
+                <span data-selected-count style="color:#888;font-size:12px;">未选择文件</span>
+                <div style="display:flex;gap:8px;">
+                    <button class="bsai-pp-btn" data-cancel>取消</button>
+                    <button class="bsai-pp-btn bsai-pp-btn-primary" data-import>导入选中文件</button>
+                </div>
+            </div>`;
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+        _addMaximizeBtn(dialog);
+
+        let currentPath = "";
+        let currentParent = "";
+        let loadingAbort = null;
+        const selectedFiles = new Map();
+
+        const FILE_ICONS = { video: "🎬", audio: "🎵", image: "🖼️" };
+
+        const renderBreadcrumb = (path) => {
+            const bcEl = dialog.querySelector("[data-breadcrumb]");
+            if (!path) {
+                bcEl.innerHTML = `<span class="bsai-pp-breadcrumb-current">💻 我的电脑</span>`;
+                return;
+            }
+            const sep = path.includes("/") ? "/" : "\\";
+            const parts = path.split(sep).filter(p => p.length > 0);
+            let html = "";
+            if (path[1] === ":") {
+                const drive = parts[0];
+                html += `<span class="bsai-pp-breadcrumb-item" data-bc-path="${drive}\\">💾 ${drive}</span>`;
+                parts.shift();
+            } else if (path.startsWith("/")) {
+                html += `<span class="bsai-pp-breadcrumb-item" data-bc-path="/">💻 根目录</span>`;
+            }
+            for (let i = 0; i < parts.length; i++) {
+                let acc;
+                if (path[1] === ":") {
+                    acc = path.split(sep).slice(0, i + 2).join(sep);
+                    if (!acc.endsWith("\\") && !acc.endsWith("/")) acc += "\\";
+                } else {
+                    acc = "/" + parts.slice(0, i + 1).join("/");
+                }
+                html += `<span class="bsai-pp-breadcrumb-sep">▸</span>`;
+                if (i < parts.length - 1) {
+                    html += `<span class="bsai-pp-breadcrumb-item" data-bc-path="${escapeHtml(acc)}">${escapeHtml(parts[i])}</span>`;
+                } else {
+                    html += `<span class="bsai-pp-breadcrumb-current">${escapeHtml(parts[i])}</span>`;
+                }
+            }
+            bcEl.innerHTML = html;
+            bcEl.querySelectorAll("[data-bc-path]").forEach(el => {
+                el.onclick = () => loadFiles(el.getAttribute("data-bc-path"));
+            });
+        };
+
+        const updateSelectedCount = () => {
+            const el = dialog.querySelector("[data-selected-count]");
+            if (el) {
+                el.textContent = selectedFiles.size > 0
+                    ? `已选择 ${selectedFiles.size} 个文件`
+                    : "未选择文件";
+            }
+        };
+
+        const loadFiles = async (path) => {
+            if (loadingAbort) { try { loadingAbort.abort(); } catch {} }
+            loadingAbort = new AbortController();
+            const listEl = dialog.querySelector("[data-file-list]");
+            listEl.innerHTML = `<div style="color:#666;padding:10px;">⏳ 加载中...</div>`;
+            const timeoutId = setTimeout(() => loadingAbort.abort(), 30000);
+            try {
+                const resp = await api.fetchApi(`/bsai_premiere_pro/browse_files?path=${encodeURIComponent(path)}`, {
+                    signal: loadingAbort.signal
+                });
+                clearTimeout(timeoutId);
+                const data = await resp.json();
+                if (data.error) {
+                    listEl.innerHTML = `<div style="color:#d35454;padding:10px;">❌ ${escapeHtml(data.error)}<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>重试</button></div>`;
+                    listEl.querySelector("[data-retry]")?.addEventListener("click", () => loadFiles(path));
+                    return;
+                }
+                currentPath = data.path || "";
+                currentParent = data.parent || "";
+                renderBreadcrumb(currentPath);
+                const manualInput = dialog.querySelector("[data-manual-path]");
+                if (manualInput && currentPath) manualInput.value = currentPath;
+                listEl.innerHTML = "";
+
+                // Count info
+                const countEl = document.createElement("div");
+                countEl.style.cssText = "color:#888;font-size:11px;padding:4px 10px;border-bottom:1px solid #333;margin-bottom:4px;";
+                const dirCount = data.dirs?.length || 0;
+                const fileCount = data.files?.length || 0;
+                countEl.textContent = `📁 ${dirCount} 个子目录  |  📄 ${fileCount} 个媒体文件`;
+                listEl.appendChild(countEl);
+
+                // Directories
+                for (const dir of (data.dirs || [])) {
+                    const item = document.createElement("div");
+                    item.className = "bsai-pp-import-item";
+                    item.innerHTML = `<span>📁</span><span>${escapeHtml(dir)}</span>`;
+                    const fullPath = currentPath + (currentPath.endsWith("\\") || currentPath.endsWith("/") ? "" : "\\") + dir;
+                    item.ondblclick = () => loadFiles(fullPath);
+                    item.onclick = () => {
+                        listEl.querySelectorAll(".bsai-pp-import-item").forEach(i => i.style.background = "");
+                        item.style.background = "#3a3a4a";
+                    };
+                    listEl.appendChild(item);
+                }
+
+                // Files
+                for (const file of (data.files || [])) {
+                    const item = document.createElement("div");
+                    item.className = "bsai-pp-import-item";
+                    const icon = FILE_ICONS[file.type] || "📄";
+                    const sizeStr = file.size > 1024 * 1024
+                        ? `${(file.size / 1024 / 1024).toFixed(1)} MB`
+                        : `${(file.size / 1024).toFixed(0)} KB`;
+                    item.innerHTML = `<span>${icon}</span><span>${escapeHtml(file.name)}</span><span class="size">${sizeStr}</span>`;
+                    item.style.cursor = "pointer";
+                    if (selectedFiles.has(file.path)) {
+                        item.style.background = "#4a90d9";
+                    }
+                    item.onclick = (e) => {
+                        if (selectedFiles.has(file.path)) {
+                            selectedFiles.delete(file.path);
+                            item.style.background = "";
+                        } else {
+                            selectedFiles.set(file.path, file);
+                            item.style.background = "#4a90d9";
+                        }
+                        updateSelectedCount();
+                    };
+                    listEl.appendChild(item);
+                }
+
+                if (dirCount === 0 && fileCount === 0) {
+                    listEl.innerHTML += `<div style="color:#666;padding:10px;">📂 没有子目录或媒体文件</div>`;
+                }
+            } catch (e) {
+                clearTimeout(timeoutId);
+                if (e.name === "AbortError") {
+                    listEl.innerHTML = `<div style="color:#d35454;padding:10px;">⏱ 加载超时，请尝试手动输入路径<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>重试</button></div>`;
+                } else {
+                    listEl.innerHTML = `<div style="color:#d35454;padding:10px;">❌ 加载失败: ${escapeHtml(e.message)}<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>重试</button></div>`;
+                }
+                listEl.querySelector("[data-retry]")?.addEventListener("click", () => loadFiles(path));
+            }
+        };
+
+        loadFiles(initialPath || "");
+
+        const manualInput = dialog.querySelector("[data-manual-path]");
+        const goToPath = () => {
+            const val = manualInput.value.trim();
+            if (val) loadFiles(val);
+        };
+        dialog.querySelector("[data-act='go']").onclick = goToPath;
+        manualInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); goToPath(); } };
+        dialog.querySelector("[data-act='up']").onclick = () => {
+            if (currentParent) loadFiles(currentParent);
+        };
+
+        dialog.querySelector("[data-cancel]").onclick = () => {
+            if (loadingAbort) { try { loadingAbort.abort(); } catch {} }
+            overlay.remove();
+            resolve(null);
+        };
+        dialog.querySelector("[data-import]").onclick = () => {
+            if (loadingAbort) { try { loadingAbort.abort(); } catch {} }
+            overlay.remove();
+            resolve(selectedFiles.size > 0 ? [...selectedFiles.values()] : null);
         };
     });
 }
@@ -1311,21 +1508,90 @@ class TimelineEditor {
     }
 
     async _importExternalFiles() {
-        const selected = await browseDirectoryDialog("");
-        if (!selected) return;
-        this._toast(`正在扫描目录: ${selected}`, "info");
-        try {
-            const resp = await api.fetchApi(`/bsai_premiere_pro/scan?directory=${encodeURIComponent(selected)}`);
-            const data = await resp.json();
-            const files = data.files || [];
-            if (files.length === 0) {
-                this._toast("该目录中没有视频文件", "info");
-                return;
+        const selected = await browseFilesDialog("");
+        if (!selected || selected.length === 0) return;
+        this._toast(`正在导入 ${selected.length} 个文件...`, "info");
+        let imported = 0;
+        for (const file of selected) {
+            try {
+                if (file.type === "video") {
+                    // Get video metadata
+                    const metaResp = await api.fetchApi(`/bsai_premiere_pro/metadata?file=${encodeURIComponent(file.path)}`);
+                    const meta = await metaResp.json();
+                    if (meta.error) {
+                        this._toast(`无法读取 ${file.name}: ${meta.error}`, "error");
+                        continue;
+                    }
+                    await this._addClipFromFile({
+                        file_path: file.path,
+                        file_name: file.name,
+                        size: file.size,
+                        duration: meta.duration || 0,
+                        width: meta.width || 1920,
+                        height: meta.height || 1080,
+                        fps: meta.fps || 30,
+                        has_audio: meta.has_audio || false,
+                    });
+                    imported++;
+                } else if (file.type === "audio") {
+                    // Add as audio clip
+                    const clip = {
+                        id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                        file_path: file.path,
+                        file_name: file.name,
+                        track_type: "audio",
+                        track_index: 0,
+                        duration: 0,
+                        trim_start: 0,
+                        trim_end: 0,
+                        video_enabled: false,
+                        audio_enabled: true,
+                        audio_replacement: null,
+                        transition_in: "cut",
+                        transition_out: "cut",
+                        transition_duration: 0.5,
+                    };
+                    this.td.clips.push(clip);
+                    if (!this.td.known_files.includes(file.name)) {
+                        this.td.known_files.push(file.name);
+                    }
+                    imported++;
+                } else if (file.type === "image") {
+                    // Add image as a video clip (single frame)
+                    const clip = {
+                        id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                        file_path: file.path,
+                        file_name: file.name,
+                        track_type: "video",
+                        track_index: 0,
+                        duration: 3,
+                        trim_start: 0,
+                        trim_end: 3,
+                        width: 1920,
+                        height: 1080,
+                        fps: 24,
+                        has_audio: false,
+                        video_enabled: true,
+                        audio_enabled: false,
+                        is_image: true,
+                        transition_in: "fade",
+                        transition_out: "fade",
+                        transition_duration: 0.5,
+                    };
+                    this.td.clips.push(clip);
+                    if (!this.td.known_files.includes(file.name)) {
+                        this.td.known_files.push(file.name);
+                    }
+                    imported++;
+                }
+            } catch (e) {
+                this._toast(`导入 ${file.name} 失败: ${e.message}`, "error");
             }
-            const known = new Set(this.td.known_files || []);
-            this._showImportDialog(files, known);
-        } catch (e) {
-            this._toast("扫描外部目录失败: " + e.message, "error");
+        }
+        if (imported > 0) {
+            this._save();
+            this._renderAll();
+            this._toast(`成功导入 ${imported} 个文件`, "success");
         }
     }
 
