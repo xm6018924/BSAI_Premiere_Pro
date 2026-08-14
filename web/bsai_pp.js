@@ -932,25 +932,45 @@ class AutoImporter {
 
     _autoLinkAndAlign(td) {
         if (!td.clips || td.clips.length === 0) return;
-        const unlinkedVideos = td.clips.filter(c => c.track_type === "video" && !c.linked_id);
-        const unlinkedAudios = td.clips.filter(c => c.track_type === "audio" && !c.linked_id);
+        const allVideos = td.clips.filter(c => c.track_type === "video");
+        const unlinkedAudios = td.clips.filter(c => c.track_type === "audio" && !c.linked_id && !c.is_gap);
+        const removedAudioIds = new Set();
         for (const audio of unlinkedAudios) {
             let audioBase = (audio.file_name || "").replace(/\.[^.]+$/, "");
             audioBase = audioBase.replace(/[-_]audio[-_]?\d*$/i, "");
-            for (const video of unlinkedVideos) {
+            let matchedVideo = null;
+            // First try unlinked videos
+            for (const video of allVideos) {
                 if (video.linked_id) continue;
                 let videoBase = (video.file_name || "").replace(/\.[^.]+$/, "");
-                if (videoBase === audioBase) {
-                    video.linked_id = audio.id;
-                    audio.linked_id = video.id;
-                    audio.trim_start = video.trim_start;
-                    audio.trim_end = video.trim_end;
-                    audio.transition_in = video.transition_in;
-                    audio.transition_out = video.transition_out;
-                    audio.transition_duration = video.transition_duration;
-                    break;
+                if (videoBase === audioBase) { matchedVideo = video; break; }
+            }
+            // Then try linked videos (replace embedded audio)
+            if (!matchedVideo) {
+                for (const video of allVideos) {
+                    if (!video.linked_id) continue;
+                    let videoBase = (video.file_name || "").replace(/\.[^.]+$/, "");
+                    if (videoBase === audioBase) {
+                        const oldAudio = td.clips.find(c => c.id === video.linked_id);
+                        if (oldAudio) { oldAudio.linked_id = null; removedAudioIds.add(oldAudio.id); }
+                        matchedVideo = video;
+                        break;
+                    }
                 }
             }
+            if (matchedVideo) {
+                matchedVideo.linked_id = audio.id;
+                audio.linked_id = matchedVideo.id;
+                audio.trim_start = matchedVideo.trim_start;
+                audio.trim_end = matchedVideo.trim_end;
+                audio.transition_in = matchedVideo.transition_in;
+                audio.transition_out = matchedVideo.transition_out;
+                audio.transition_duration = matchedVideo.transition_duration;
+            }
+        }
+        // Remove replaced embedded audio clips
+        if (removedAudioIds.size > 0) {
+            td.clips = td.clips.filter(c => !removedAudioIds.has(c.id));
         }
         const videoClips = td.clips.filter(c => c.track_type === "video");
         const allAudioClips = td.clips.filter(c => c.track_type === "audio");
@@ -1031,7 +1051,7 @@ class AutoImporter {
                 if (treatAsAudioOnly) {
                     td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: null, is_video_part: false });
                 } else if (isImage || !hasAudio) {
-                    td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: null, is_video_part: true });
+                    td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: null, is_video_part: true, is_image: isImage || undefined });
                 } else {
                     td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: aId, is_video_part: true });
                     td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: vId, is_video_part: false });
@@ -2406,6 +2426,8 @@ class TimelineEditor {
                 if (btn) btn.textContent = "⏸️ 暂停";
                 if (inlineVideo.tagName === "VIDEO") {
                     inlineVideo.play().catch(() => {});
+                    const inlineAudio = this.modal.querySelector(".bsai-pp-inline-audio");
+                    if (inlineAudio) inlineAudio.play().catch(() => {});
                 } else {
                     // Image: restart animation from paused position
                     const clip = this._playClips[this._playClipIndex];
@@ -2554,31 +2576,34 @@ class TimelineEditor {
         video.style.cssText = "width:100%;height:100%;object-fit:contain;position:absolute;top:0;left:0;background:#000;z-index:5;";
         video.src = videoSrc;
 
-        // Determine if audio should be muted
-        let shouldMute = false;
-        if (clip.has_audio !== false) {
-            if (!clip.linked_id) {
-                shouldMute = true;
-            } else {
-                const linkedAudio = this.td.clips.find(c => c.id === clip.linked_id);
-                if (!linkedAudio || linkedAudio.is_gap) {
-                    shouldMute = true;
-                } else if (linkedAudio.audio_enabled === false) {
-                    shouldMute = true;
-                }
-            }
-        }
-        if (!shouldMute && clip.linked_id) {
+        // Determine audio playback strategy
+        let separateAudioEl = null;
+        let shouldMuteVideo = false;
+
+        if (clip.linked_id) {
             const linkedAudio = this.td.clips.find(c => c.id === clip.linked_id);
-            if (linkedAudio && linkedAudio.track_index != null) {
+            if (linkedAudio && !linkedAudio.is_gap && linkedAudio.file_path && linkedAudio.audio_enabled !== false) {
                 const audioTracks = this.td.audio_tracks || [];
-                const aTrack = audioTracks[linkedAudio.track_index];
-                if (aTrack && aTrack.muted) shouldMute = true;
+                const aTrack = linkedAudio.track_index != null ? audioTracks[linkedAudio.track_index] : null;
+                if (aTrack && aTrack.muted) {
+                    shouldMuteVideo = true;
+                } else {
+                    shouldMuteVideo = true;
+                    separateAudioEl = document.createElement("audio");
+                    separateAudioEl.className = "bsai-pp-inline-audio";
+                    separateAudioEl.src = `/bsai_premiere_pro/stream?file=${encodeURIComponent(linkedAudio.file_path)}`;
+                    separateAudioEl.style.display = "none";
+                }
+            } else {
+                shouldMuteVideo = (clip.has_audio === false);
             }
+        } else {
+            shouldMuteVideo = (clip.has_audio === false);
         }
-        video.muted = shouldMute;
+        video.muted = shouldMuteVideo;
 
         thumbDiv.appendChild(video);
+        if (separateAudioEl) thumbDiv.appendChild(separateAudioEl);
 
         const posX = clip.pos_x ?? 0;
         const posY = clip.pos_y ?? 0;
@@ -2597,6 +2622,7 @@ class TimelineEditor {
             video.onloadedmetadata = null;
             video.pause();
             video.remove();
+            if (separateAudioEl) { separateAudioEl.pause(); separateAudioEl.remove(); }
             this._playClipIndex++;
             this._playNextClip();
         };
@@ -2608,6 +2634,10 @@ class TimelineEditor {
                 try { video.currentTime = seekTo; } catch {}
             }
             video.play().catch(() => {});
+            if (separateAudioEl) {
+                try { separateAudioEl.currentTime = seekTo; } catch {}
+                separateAudioEl.play().catch(() => {});
+            }
         };
 
         video.ontimeupdate = () => {
@@ -2648,6 +2678,8 @@ class TimelineEditor {
             }
             if (inlineVideo.pause) inlineVideo.pause();
         }
+        const inlineAudio = this.modal.querySelector(".bsai-pp-inline-audio");
+        if (inlineAudio) inlineAudio.pause();
         const btn = this.modal.querySelector("#bsai-pp-play-btn");
         if (btn) btn.textContent = "▶️ 播放";
         const footerInfo = this.modal.querySelector("[data-footer-info]");
@@ -2661,8 +2693,10 @@ class TimelineEditor {
         this._playClipIndex = 0;
         this._pausedClip = null;
         this._pausedVideoTime = null;
-        // Remove all inline videos from clip blocks
+        // Remove all inline videos and audio from clip blocks
         this.modal.querySelectorAll(".bsai-pp-inline-video").forEach(v => { v.pause?.(); v.remove(); });
+        this.modal.querySelectorAll(".bsai-pp-inline-audio").forEach(v => { v.pause?.(); v.remove(); });
+        this.modal.querySelectorAll(".bsai-pp-inline-image").forEach(v => { v.remove(); });
         // Remove playhead
         this._removePlayhead();
         // Only hide timeline preview overlay if it was used for inline playback (not render preview)
@@ -3893,27 +3927,47 @@ class TimelineEditor {
     }
 
     _autoLinkClips() {
-        const unlinkedVideos = this.td.clips.filter(c => c.track_type === "video" && !c.linked_id);
-        const unlinkedAudios = this.td.clips.filter(c => c.track_type === "audio" && !c.linked_id);
+        const allVideos = this.td.clips.filter(c => c.track_type === "video");
+        const unlinkedAudios = this.td.clips.filter(c => c.track_type === "audio" && !c.linked_id && !c.is_gap);
         let linked = 0;
+        const removedAudioIds = new Set();
         for (const audio of unlinkedAudios) {
-            let audioBase = audio.file_name.replace(/\.[^.]+$/, "");
+            let audioBase = (audio.file_name || "").replace(/\.[^.]+$/, "");
             audioBase = audioBase.replace(/[-_]audio[-_]?\d*$/i, "");
-            for (const video of unlinkedVideos) {
+            let matchedVideo = null;
+            // First try unlinked videos
+            for (const video of allVideos) {
                 if (video.linked_id) continue;
-                let videoBase = video.file_name.replace(/\.[^.]+$/, "");
-                if (videoBase === audioBase) {
-                    video.linked_id = audio.id;
-                    audio.linked_id = video.id;
-                    audio.trim_start = video.trim_start;
-                    audio.trim_end = video.trim_end;
-                    audio.transition_in = video.transition_in;
-                    audio.transition_out = video.transition_out;
-                    audio.transition_duration = video.transition_duration;
-                    linked++;
-                    break;
+                let videoBase = (video.file_name || "").replace(/\.[^.]+$/, "");
+                if (videoBase === audioBase) { matchedVideo = video; break; }
+            }
+            // Then try linked videos (replace embedded audio with separate audio)
+            if (!matchedVideo) {
+                for (const video of allVideos) {
+                    if (!video.linked_id) continue;
+                    let videoBase = (video.file_name || "").replace(/\.[^.]+$/, "");
+                    if (videoBase === audioBase) {
+                        const oldAudio = this.td.clips.find(c => c.id === video.linked_id);
+                        if (oldAudio) { oldAudio.linked_id = null; removedAudioIds.add(oldAudio.id); }
+                        matchedVideo = video;
+                        break;
+                    }
                 }
             }
+            if (matchedVideo) {
+                matchedVideo.linked_id = audio.id;
+                audio.linked_id = matchedVideo.id;
+                audio.trim_start = matchedVideo.trim_start;
+                audio.trim_end = matchedVideo.trim_end;
+                audio.transition_in = matchedVideo.transition_in;
+                audio.transition_out = matchedVideo.transition_out;
+                audio.transition_duration = matchedVideo.transition_duration;
+                linked++;
+            }
+        }
+        // Remove replaced embedded audio clips
+        if (removedAudioIds.size > 0) {
+            this.td.clips = this.td.clips.filter(c => !removedAudioIds.has(c.id));
         }
         // Rearrange clips: video first, paired audio immediately after, unlinked audio at end
         if (linked > 0 || unlinkedAudios.length > 0) {
@@ -4076,7 +4130,7 @@ class TimelineEditor {
                 this.td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: null, is_video_part: false });
             } else if (isImage || !hasAudio) {
                 // Image or video without audio: create video clip only, no audio clip
-                this.td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: null, is_video_part: true });
+                this.td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: null, is_video_part: true, is_image: isImage || undefined });
             } else {
                 // Video with audio: create both linked clips
                 this.td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: aId, is_video_part: true });

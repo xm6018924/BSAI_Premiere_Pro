@@ -98,15 +98,30 @@ async def list_audio_files(request):
         return web.json_response({"files": [], "error": str(e)}, status=500)
 
 
+import mimetypes
+
+_CONTENT_TYPE_OVERRIDES = {
+    ".mp3": "audio/mpeg", ".wav": "audio/wav", ".aac": "audio/aac",
+    ".flac": "audio/flac", ".ogg": "audio/ogg", ".m4a": "audio/mp4",
+    ".wma": "audio/x-ms-wma", ".opus": "audio/opus",
+}
+
+
 @PromptServer.instance.routes.get("/bsai_premiere_pro/stream")
 async def stream_video(request):
-    """Stream a video file for timeline playback with Range support."""
+    """Stream a video/audio/image file for timeline playback with Range support."""
     file_path = request.query.get("file", "")
     file_path = urllib.parse.unquote(file_path)
     if not file_path or not os.path.exists(file_path):
         return web.Response(status=404, text="File not found")
 
     file_size = os.path.getsize(file_path)
+    ext = os.path.splitext(file_path)[1].lower()
+    content_type = _CONTENT_TYPE_OVERRIDES.get(ext)
+    if not content_type:
+        guessed, _ = mimetypes.guess_type(file_path)
+        content_type = guessed or "video/mp4"
+
     range_header = request.headers.get("Range")
 
     if range_header:
@@ -127,7 +142,7 @@ async def stream_video(request):
                     "Content-Range": f"bytes {start}-{end}/{file_size}",
                     "Accept-Ranges": "bytes",
                     "Content-Length": str(chunk_size),
-                    "Content-Type": "video/mp4",
+                    "Content-Type": content_type,
                 },
             )
 
@@ -139,7 +154,7 @@ async def stream_video(request):
         headers={
             "Accept-Ranges": "bytes",
             "Content-Length": str(file_size),
-            "Content-Type": "video/mp4",
+            "Content-Type": content_type,
         },
     )
 
