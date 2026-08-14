@@ -32,8 +32,13 @@ _BSAI_TAG_RE = re.compile(
 
 
 def _get_script_tag():
-    """Build script tag with current file mtime (dynamic, not cached)."""
-    v = str(int(os.path.getmtime(_js_path)) if os.path.exists(_js_path) else int(time.time()))
+    """Build script tag with current file mtime+size (dynamic, not cached)."""
+    if os.path.exists(_js_path):
+        mtime = os.path.getmtime(_js_path)
+        size = os.path.getsize(_js_path)
+        v = f"{mtime:.6f}_{size}"
+    else:
+        v = str(time.time())
     return f'<script src="/extensions/{_FOLDER_NAME}/bsai_pp.js?v={v}"></script>'
 
 
@@ -95,6 +100,12 @@ try:
     async def _bsai_inject_on_response(request, response):
         """Inject script tag into HTML responses via on_response_prepare."""
         path = getattr(request, "path", "")
+        # Force no-cache for our JS files so browser ALWAYS fetches latest
+        if f"/extensions/{_FOLDER_NAME}/" in path and path.endswith(".js"):
+            response.headers["Cache-Control"] = "no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            return
         if path != "/":
             return
         content_type = getattr(response, "content_type", "") or ""
