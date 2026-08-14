@@ -276,43 +276,41 @@ const STYLES = `
 }
 /* ── Timeline playback overlay (replaces separate preview window) ── */
 .bsai-pp-timeline-preview {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
-    width: 480px; height: 270px; background: #000; z-index: 200; display: none;
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    background: #000; z-index: 300; display: none;
     align-items: center; justify-content: center; overflow: hidden;
-    border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.6);
-    transition: width 0.3s ease, height 0.3s ease;
 }
 .bsai-pp-timeline-preview.visible { display: flex; }
 .bsai-pp-timeline-preview.fullscreen {
     width: 100%; height: 100%; top: 0; left: 0; transform: none;
-    border-radius: 0; box-shadow: none;
 }
 .bsai-pp-timeline-preview video {
     width: 100%; height: 100%; object-fit: contain; background: #000;
+    transition: transform 0.1s ease;
 }
 .bsai-pp-timeline-preview .preview-close {
-    position: absolute; top: 6px; right: 6px; z-index: 201;
+    position: absolute; top: 6px; right: 6px; z-index: 301;
     background: rgba(0,0,0,0.7); color: #fff; border: none;
     width: 28px; height: 28px; border-radius: 50%; cursor: pointer; font-size: 14px;
 }
 .bsai-pp-timeline-preview .preview-close:hover { background: rgba(220,53,53,0.8); }
 .bsai-pp-timeline-preview .preview-enlarge {
-    position: absolute; top: 6px; right: 40px; z-index: 201;
+    position: absolute; top: 6px; right: 40px; z-index: 301;
     background: rgba(0,0,0,0.7); color: #fff; border: none;
     width: 28px; height: 28px; border-radius: 4px; cursor: pointer; font-size: 14px;
 }
 .bsai-pp-timeline-preview .preview-enlarge:hover { background: rgba(74,144,217,0.8); }
 .bsai-pp-timeline-preview .preview-info {
-    position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%); z-index: 201;
+    position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%); z-index: 301;
     background: rgba(0,0,0,0.75); color: #fff; padding: 4px 12px;
     border-radius: 4px; font-size: 11px; font-family: monospace; white-space: nowrap;
 }
 .bsai-pp-timeline-preview .preview-progress {
     position: absolute; bottom: 0; left: 0; width: 0%; height: 3px;
-    background: #4a90d9; z-index: 201; transition: width 0.1s linear;
+    background: #4a90d9; z-index: 301; transition: width 0.1s linear;
 }
 .bsai-pp-timeline-preview .preview-zoom-info {
-    position: absolute; top: 6px; left: 50%; transform: translateX(-50%); z-index: 201;
+    position: absolute; top: 6px; left: 50%; transform: translateX(-50%); z-index: 301;
     background: rgba(0,0,0,0.75); color: #fff; padding: 3px 10px;
     border-radius: 4px; font-size: 11px; font-family: monospace; display: none;
 }
@@ -1174,14 +1172,6 @@ class TimelineEditor {
                         <div class="bsai-pp-timeline-scroll" data-timeline-scroll>
                             <div class="bsai-pp-timeline-container" data-track-container></div>
                         </div>
-                        <div class="bsai-pp-timeline-preview" data-timeline-preview>
-                            <video data-preview-video></video>
-                            <button class="preview-enlarge" data-act="enlarge-preview" title="放大/缩小">⛶</button>
-                            <button class="preview-close" data-act="close-preview">✕</button>
-                            <div class="preview-info" data-preview-info></div>
-                            <div class="preview-zoom-info" data-preview-zoom-info></div>
-                            <div class="preview-progress" data-preview-progress></div>
-                        </div>
                     </div>
                     <div class="bsai-pp-edit-section">
                         <div class="bsai-pp-section-label">剪辑面板</div>
@@ -1191,6 +1181,14 @@ class TimelineEditor {
                 <div class="bsai-pp-footer">
                     <div class="bsai-pp-footer-info" data-footer-info></div>
                     <button class="bsai-pp-btn bsai-pp-btn-primary" data-act="render">🎞️ 渲染输出</button>
+                </div>
+                <div class="bsai-pp-timeline-preview" data-timeline-preview>
+                    <video data-preview-video></video>
+                    <button class="preview-enlarge" data-act="enlarge-preview" title="放大/缩小">⛶</button>
+                    <button class="preview-close" data-act="close-preview">✕</button>
+                    <div class="preview-info" data-preview-info></div>
+                    <div class="preview-zoom-info" data-preview-zoom-info></div>
+                    <div class="preview-progress" data-preview-progress></div>
                 </div>
             </div>`;
         this.modal.addEventListener("click", (e) => this._onClick(e));
@@ -1282,10 +1280,10 @@ class TimelineEditor {
         }
         this.modal.querySelector('[data-act="close-preview"]').onclick = (e) => {
             e.stopPropagation();
-            this._stopPlayback();
             const overlay = this.modal.querySelector("[data-timeline-preview]");
             if (overlay) {
                 overlay.classList.remove("visible", "fullscreen");
+                overlay.style.cssText = "";
                 const enlargeBtn = this.modal.querySelector('[data-act="enlarge-preview"]');
                 if (enlargeBtn) enlargeBtn.textContent = "⛶";
             }
@@ -1295,24 +1293,45 @@ class TimelineEditor {
                 video.ontimeupdate = null;
                 video.onended = null;
                 video.style.transform = "";
+                video.style.width = "";
+                video.style.height = "";
             }
             this._previewVideoActive = false;
             this._previewZoom = 1;
+            this._stopPlayback();
         };
         this.modal.querySelector('[data-act="enlarge-preview"]').onclick = (e) => {
             e.stopPropagation();
             const overlay = this.modal.querySelector("[data-timeline-preview]");
-            if (overlay) overlay.classList.toggle("fullscreen");
-            e.target.textContent = overlay.classList.contains("fullscreen") ? "🗗" : "⛶";
+            if (!overlay) return;
+            // Toggle between fullscreen and windowed mode
+            if (overlay.classList.contains("fullscreen")) {
+                // Switch to windowed (small) mode
+                overlay.classList.remove("fullscreen");
+                overlay.style.width = "60%";
+                overlay.style.height = "70%";
+                overlay.style.top = "50%";
+                overlay.style.left = "50%";
+                overlay.style.transform = "translate(-50%,-50%)";
+                overlay.style.borderRadius = "8px";
+                overlay.style.boxShadow = "0 4px 20px rgba(0,0,0,0.6)";
+                e.target.textContent = "⛶";
+            } else {
+                // Switch back to fullscreen mode
+                overlay.classList.add("fullscreen");
+                overlay.style.cssText = "";
+                e.target.textContent = "🗗";
+            }
         };
         // Mouse wheel to zoom preview video
         const previewOverlay = this.modal.querySelector("[data-timeline-preview]");
         const previewVideo = this.modal.querySelector("[data-preview-video]");
         if (previewOverlay && previewVideo) {
             this._previewZoom = 1;
-            previewOverlay.addEventListener("wheel", (e) => {
+            const wheelHandler = (e) => {
                 if (!this._previewVideoActive) return;
                 e.preventDefault();
+                e.stopPropagation();
                 const delta = e.deltaY < 0 ? 1.1 : 0.9;
                 this._previewZoom = Math.max(0.5, Math.min(5, this._previewZoom * delta));
                 previewVideo.style.transform = `scale(${this._previewZoom})`;
@@ -1324,7 +1343,9 @@ class TimelineEditor {
                     clearTimeout(this._zoomInfoTimer);
                     this._zoomInfoTimer = setTimeout(() => zoomInfo.classList.remove("visible"), 1500);
                 }
-            }, { passive: false });
+            };
+            previewOverlay.addEventListener("wheel", wheelHandler, { passive: false });
+            previewVideo.addEventListener("wheel", wheelHandler, { passive: false });
         }
         this.modal.querySelector('[data-act="zoom-in"]').onclick = () => this._adjustZoom(1.25);
         this.modal.querySelector('[data-act="zoom-out"]').onclick = () => this._adjustZoom(0.8);
@@ -3563,20 +3584,22 @@ class TimelineEditor {
         const video = this.modal.querySelector("[data-preview-video]");
         if (overlay && video) {
             video.src = `/view?filename=${encodeURIComponent(filename)}&type=output`;
+            // Set previewVideoActive BEFORE stopPlayback so it won't hide the overlay
+            this._previewVideoActive = true;
+            // Stop any timeline playback first
+            this._stopPlayback();
+            // Now show the overlay in fullscreen
             overlay.classList.add("visible");
-            // Default to fullscreen playback
             overlay.classList.add("fullscreen");
             const enlargeBtn = this.modal.querySelector('[data-act="enlarge-preview"]');
             if (enlargeBtn) enlargeBtn.textContent = "🗗";
             const infoEl = this.modal.querySelector("[data-preview-info]");
             if (infoEl) infoEl.textContent = `🎞️ 渲染结果: ${filename}`;
-            // Stop any timeline playback first
-            this._stopPlayback();
-            // Track that preview video is active so spacebar controls it
-            this._previewVideoActive = true;
             // Reset zoom
             this._previewZoom = 1;
             video.style.transform = "";
+            video.style.width = "100%";
+            video.style.height = "100%";
             video.play().catch(() => {});
             // Add timeupdate for progress bar
             video.ontimeupdate = () => {
