@@ -1613,6 +1613,59 @@ class TimelineEditor {
                     this._deleteClip(this.selectedIndex);
                 }
             }
+            // Don't intercept when typing in input/textarea
+            const tag = e.target?.tagName?.toLowerCase();
+            if (tag === "input" || tag === "textarea" || tag === "select") return;
+            // Home: jump to first frame
+            if (e.key === "Home") {
+                e.preventDefault();
+                this._playheadTime = 0;
+                this._renderTimelinePlayhead();
+                this._scrollToPlayhead();
+            }
+            // End: jump to last frame
+            if (e.key === "End") {
+                e.preventDefault();
+                const vClips = this.td.clips.filter(c => c.track_type === "video");
+                if (vClips.length > 0) {
+                    let totalDur = 0;
+                    for (const c of vClips) totalDur += (c.trim_end - c.trim_start);
+                    this._playheadTime = Math.max(0, totalDur - 0.001);
+                    this._renderTimelinePlayhead();
+                    this._scrollToPlayhead();
+                }
+            }
+            // Arrow left: go back 1 frame
+            if (e.key === "ArrowLeft") {
+                e.preventDefault();
+                const fps = this._getCurrentFps();
+                if (this._playheadTime === null) this._playheadTime = 0;
+                this._playheadTime = Math.max(0, this._playheadTime - 1 / fps);
+                this._renderTimelinePlayhead();
+                this._scrollToPlayhead();
+            }
+            // Arrow right: go forward 1 frame
+            if (e.key === "ArrowRight") {
+                e.preventDefault();
+                const fps = this._getCurrentFps();
+                if (this._playheadTime === null) this._playheadTime = 0;
+                const vClips = this.td.clips.filter(c => c.track_type === "video");
+                let totalDur = 0;
+                for (const c of vClips) totalDur += (c.trim_end - c.trim_start);
+                this._playheadTime = Math.min(totalDur, this._playheadTime + 1 / fps);
+                this._renderTimelinePlayhead();
+                this._scrollToPlayhead();
+            }
+            // Arrow up: zoom in timeline
+            if (e.key === "ArrowUp") {
+                e.preventDefault();
+                this._adjustZoom(1.2);
+            }
+            // Arrow down: zoom out timeline
+            if (e.key === "ArrowDown") {
+                e.preventDefault();
+                this._adjustZoom(0.83);
+            }
         };
         document.addEventListener("keydown", this._docKeydown);
         this.modal.querySelector('[data-act="browse-dir"]').onclick = () => this._browseDirectory();
@@ -2568,6 +2621,28 @@ class TimelineEditor {
             }
         });
         container.appendChild(ph);
+    }
+
+    _getCurrentFps() {
+        if (this.selectedIndex >= 0 && this.td.clips[this.selectedIndex]) {
+            return this.td.clips[this.selectedIndex].fps || 30;
+        }
+        const vClips = this.td.clips.filter(c => c.track_type === "video");
+        if (vClips.length > 0) return vClips[0].fps || 30;
+        return 30;
+    }
+
+    _scrollToPlayhead() {
+        const scrollContainer = this.modal.querySelector("[data-timeline-scroll]");
+        if (!scrollContainer) return;
+        const pps = this._pps || 15;
+        const playheadX = (this._playheadTime || 0) * pps;
+        const visW = scrollContainer.clientWidth || 800;
+        const left = scrollContainer.scrollLeft;
+        const right = left + visW;
+        if (playheadX < left + 50 || playheadX > right - 50) {
+            scrollContainer.scrollLeft = Math.max(0, playheadX - visW / 2);
+        }
     }
 
     _cutAtPlayhead() {
