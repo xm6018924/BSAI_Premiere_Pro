@@ -1166,8 +1166,7 @@ class TimelineEditor {
                     <label>仅带音频</label>
                     <input type="checkbox" data-act="filter-audio" ${this.td.filter_audio_only !== false ? "checked" : ""}>
                     <button class="bsai-pp-btn" data-act="scan">🔍 扫描</button>
-                    <button class="bsai-pp-btn" data-act="manual-import">📥 手动导入</button>
-                    <button class="bsai-pp-btn" data-act="import-external">📂 添加外部文件</button>
+                    <button class="bsai-pp-btn" data-act="manual-import">📥 导入文件</button>
                     <button class="bsai-pp-btn" data-act="dir-history">📚 历史目录</button>
                     <button class="bsai-pp-btn" data-act="scissor" id="bsai-pp-scissor-btn">✂️ 剪刀</button>
                     <button class="bsai-pp-btn" data-act="play" id="bsai-pp-play-btn">▶️ 播放</button>
@@ -1500,7 +1499,6 @@ class TimelineEditor {
         };
         this.modal.querySelector('[data-act="scan"]').onclick = () => this._scanNow();
         this.modal.querySelector('[data-act="manual-import"]').onclick = () => this._manualImport();
-        this.modal.querySelector('[data-act="import-external"]').onclick = () => this._importExternalFiles();
         this.modal.querySelector('[data-act="dir-history"]').onclick = (e) => this._showDirHistory(e);
         this.modal.querySelector('[data-act="scissor"]').onclick = () => this._toggleScissorMode();
         this.modal.querySelector('[data-act="play"]').onclick = () => this._togglePlayback();
@@ -1774,8 +1772,38 @@ class TimelineEditor {
 
     async _browseDirectory() {
         const oldDir = this._getWidgetValue("watch_directory", "");
-        const selected = await browseDirectoryDialog(oldDir);
-        if (selected && selected !== oldDir) {
+        // Use native directory picker via hidden input with webkitdirectory
+        const input = document.createElement("input");
+        input.type = "file";
+        input.setAttribute("webkitdirectory", "");
+        input.style.display = "none";
+        document.body.appendChild(input);
+
+        input.onchange = async () => {
+            const files = Array.from(input.files || []);
+            document.body.removeChild(input);
+            if (files.length === 0) return;
+            // Extract directory path from the first file's webkitRelativePath
+            // The actual file path is in file.path (if available) or we derive the directory
+            const firstFile = files[0];
+            // webkitRelativePath gives relative path like "folder/sub/file.mp4"
+            // The full path is in file.path on Electron/CEF environments
+            let selected = "";
+            if (firstFile.path) {
+                // Remove the filename to get directory path
+                const fullPath = firstFile.path;
+                const lastSep = Math.max(fullPath.lastIndexOf("\\"), fullPath.lastIndexOf("/"));
+                selected = lastSep >= 0 ? fullPath.substring(0, lastSep) : fullPath;
+            } else {
+                // Fallback: use webkitRelativePath top folder
+                const relPath = firstFile.webkitRelativePath || "";
+                const topFolder = relPath.split("/")[0];
+                selected = topFolder || "";
+            }
+            if (!selected || selected === oldDir) {
+                if (selected === oldDir) this._toast("目录未变化", "info");
+                return;
+            }
             // Save current timeline state to directory_history
             if (!this.td.directory_history) this.td.directory_history = {};
             if (oldDir) {
@@ -1814,7 +1842,8 @@ class TimelineEditor {
             if (!hist) {
                 setTimeout(() => this._scanNow(), 100);
             }
-        }
+        };
+        input.click();
     }
 
     _showDirHistory(e) {
@@ -3414,25 +3443,58 @@ class TimelineEditor {
     }
 
     async _manualImport() {
-        const dir = this._getWidgetValue("watch_directory", "output");
-        try {
-            const resp = await api.fetchApi(`/bsai_premiere_pro/scan?directory=${encodeURIComponent(dir)}`);
-            const data = await resp.json();
-            const known = new Set(this.td.known_files || []);
-            const available = (data.files || []).filter(f => !known.has(f.file_name));
-            if (available.length === 0 && (data.files || []).length === 0) {
-                this._toast("目录中没有视频文件", "info");
-                return;
+        // Use native Windows file picker via hidden input element
+        const input = document.createElement("input");
+        input.type = "file";
+        input.multiple = true;
+        input.accept = "video/*,audio/*,image/*";
+        input.style.display = "none";
+        document.body.appendChild(input);
+
+        input.onchange = async () => {
+            const files = Array.from(input.files || []);
+            document.body.removeChild(input);
+            if (files.length === 0) return;
+            this._toast(`正在导入 ${files.length} 个文件...`, "info");
+            let imported = 0;
+            for (const file of files) {
+                // Convert File object to path - use file path if available, otherwise use name
+                const filePath = file.path || file.name;
+                const isVideo = /\.(mp4|avi|mov|mkv|webm|flv|wmv|m4v|mpg|mpeg|ts|3gp)$/i.test(file.name);
+                const isAudio = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(file.name);
+                if (!isVideo && !isAudio) {
+                    this._toast(`跳过不支持的文件: ${file.name}`, "error");
+                    continue;
+                }
+                try {
+                    const metaResp = await api.fetchApi(`/bsai_premiere_pro/metadata?file=${encodeURIComponent(filePath)}`);
+                    const meta = await metaResp.json();
+                    if (meta.error) {
+                        this._toast(`无法读取 ${file.name}: ${meta.error}`, "error");
+                        continue;
+                    }
+                    await this._addClipFromFile({
+                        file_path: filePath,
+                        file_name: file.name,
+                        size: file.size,
+                        duration: meta.duration || 0,
+                        width: meta.width || 1920,
+                        height: meta.height || 1080,
+                        fps: meta.fps || 30,
+                        has_audio: meta.has_audio || false,
+                    });
+                    imported++;
+                } catch (e) {
+                    this._toast(`导入 ${file.name} 失败: ${e.message}`, "error");
+                }
             }
-            const allFiles = data.files || [];
-            if (allFiles.length === 0) {
-                this._toast("没有可导入的视频", "info");
-                return;
+            if (imported > 0) {
+                this._toast(`成功导入 ${imported} 个文件`, "success");
+                this._save();
+                this._renderAll();
             }
-            this._showImportDialog(allFiles, known);
-        } catch (e) {
-            this._toast("获取文件列表失败: " + e.message, "error");
-        }
+        };
+        input.click();
     }
 
     _showImportDialog(files, knownSet) {
