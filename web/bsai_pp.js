@@ -1840,6 +1840,9 @@ class TimelineEditor {
         const display = this.modal.querySelector("[data-zoom-display]");
         if (display) display.textContent = Math.round(this._zoomLevel * 100) + "%";
 
+        // Check if playback is active — save state to restore after re-render
+        const wasPlaying = this._isPlaying;
+
         // Preserve scroll center: focus on playhead, selected clip, or view center
         const scrollContainer = this.modal.querySelector("[data-timeline-scroll]");
         const oldPps = this._pps || 15;
@@ -1862,6 +1865,9 @@ class TimelineEditor {
             }
         }
 
+        // Stop playback before re-rendering (re-render destroys inline video)
+        if (wasPlaying) this._stopPlayback();
+
         this._renderTimeline();
 
         // After render, scroll to keep focusTime centered
@@ -1871,6 +1877,15 @@ class TimelineEditor {
             const newCenterPx = SPACER_W + focusTime * newPps;
             const visW = scrollContainer.clientWidth || 800;
             scrollContainer.scrollLeft = Math.max(0, newCenterPx - visW / 2);
+        }
+
+        // Restore playback from the current playhead position
+        if (wasPlaying) {
+            this._isPlaying = false;
+            this._pausedClip = null;
+            this._pausedVideoTime = null;
+            this._playStartOffset = null;
+            this._startPlayback();
         }
     }
 
@@ -2559,6 +2574,9 @@ class TimelineEditor {
                         playhead.style.left = (blockLeft + elapsed * pps) + "px";
                     }
                 }
+                // Update _playheadTime so zoom centers on current playback position
+                const imgClipStart = this._getClipStartTime(clip);
+                this._playheadTime = imgClipStart + elapsed;
                 // Update footer
                 const footerInfo = this.modal.querySelector("[data-footer-info]");
                 if (footerInfo) {
@@ -2751,9 +2769,14 @@ class TimelineEditor {
         const blockLeft = blockRect.left - containerRect.left;
         const pps = this._pps || 15;
         const trimStart = currentClip.trim_start || 0;
-        const elapsedInClip = Math.max(0, videoEl.currentTime - trimStart);
+        const elapsedInClip = videoEl.tagName === "VIDEO"
+            ? Math.max(0, videoEl.currentTime - trimStart)
+            : (this._imageElapsed || 0);
         const x = blockLeft + elapsedInClip * pps;
         playhead.style.left = x + "px";
+        // Update _playheadTime so zoom centers on current playback position
+        const clipStart = this._getClipStartTime(currentClip);
+        this._playheadTime = clipStart + elapsedInClip;
     }
 
     _removePlayhead() {
