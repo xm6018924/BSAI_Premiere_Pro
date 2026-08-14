@@ -973,9 +973,17 @@ class AutoImporter {
             td.clips = td.clips.filter(c => !removedAudioIds.has(c.id));
         }
         const videoClips = td.clips.filter(c => c.track_type === "video");
-        const allAudioClips = td.clips.filter(c => c.track_type === "audio");
+        // Remove old gap clips first to prevent accumulation
+        td.clips = td.clips.filter(c => !c.is_gap);
+        const allAudioClips = td.clips.filter(c => c.track_type === "audio" && !c.is_gap);
         const usedAudioIds = new Set();
         const newClips = [];
+        // Place unlinked audio at the beginning (aligned with first video)
+        const unlinkedAudios = allAudioClips.filter(a => !a.linked_id);
+        for (const aClip of unlinkedAudios) {
+            newClips.push(aClip);
+            usedAudioIds.add(aClip.id);
+        }
         for (const vClip of videoClips) {
             newClips.push(vClip);
             const vDur = (vClip.trim_end - vClip.trim_start) || 0;
@@ -995,9 +1003,6 @@ class AutoImporter {
                 is_gap: true, linked_id: null,
                 transition_in: "cut", transition_out: "cut", transition_duration: 0,
             });
-        }
-        for (const aClip of allAudioClips) {
-            if (!usedAudioIds.has(aClip.id)) newClips.push(aClip);
         }
         td.clips = newClips;
     }
@@ -3999,10 +4004,20 @@ class TimelineEditor {
     }
 
     _alignAudioToVideo() {
+        // Remove old gap clips first to prevent accumulation
+        this.td.clips = this.td.clips.filter(c => !c.is_gap);
+
         const videoClips = this.td.clips.filter(c => c.track_type === "video");
-        const allAudioClips = this.td.clips.filter(c => c.track_type === "audio");
+        const allAudioClips = this.td.clips.filter(c => c.track_type === "audio" && !c.is_gap);
         const usedAudioIds = new Set();
         const newClips = [];
+
+        // Place unlinked audio at the beginning (aligned with first video)
+        const unlinkedAudios = allAudioClips.filter(a => !a.linked_id);
+        for (const aClip of unlinkedAudios) {
+            newClips.push(aClip);
+            usedAudioIds.add(aClip.id);
+        }
 
         for (const vClip of videoClips) {
             newClips.push(vClip);
@@ -4030,12 +4045,6 @@ class TimelineEditor {
                 transition_out: "cut",
                 transition_duration: 0,
             });
-        }
-
-        for (const aClip of allAudioClips) {
-            if (!usedAudioIds.has(aClip.id)) {
-                newClips.push(aClip);
-            }
         }
 
         this.td.clips = newClips;
