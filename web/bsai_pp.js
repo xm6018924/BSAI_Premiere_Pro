@@ -2201,16 +2201,23 @@ class TimelineEditor {
                     });
                     imported++;
                 } else if (file.type === "audio") {
-                    // Add as audio clip
+                    // Fetch metadata for audio file to get correct duration
+                    let audioDuration = 0;
+                    try {
+                        const metaResp = await api.fetchApi(`/bsai_premiere_pro/metadata?file=${encodeURIComponent(file.path)}`);
+                        const meta = await metaResp.json();
+                        if (!meta.error) audioDuration = meta.duration || 0;
+                    } catch {}
+                    if (audioDuration === 0) audioDuration = 5;
                     const clip = {
                         id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                         file_path: file.path,
                         file_name: file.name,
                         track_type: "audio",
                         track_index: 0,
-                        duration: 0,
+                        duration: audioDuration,
                         trim_start: 0,
-                        trim_end: 0,
+                        trim_end: audioDuration,
                         video_enabled: false,
                         audio_enabled: true,
                         audio_replacement: null,
@@ -2455,7 +2462,9 @@ class TimelineEditor {
         const clip = this._playClips[this._playClipIndex];
         const filePath = clip.file_path || "";
         const trimStart = clip.trim_start || 0;
-        const trimEnd = clip.trim_end || clip.duration || 0;
+        const trimEnd = clip.trim_end || clip.duration || 3;
+        // Safety: ensure minimum 0.1s duration to prevent instant-skip playback issues
+        if (trimEnd <= trimStart) { clip.trim_end = trimStart + (clip.duration || 3); }
 
         // Remove any previous inline video/image
         this.modal.querySelectorAll(".bsai-pp-inline-video").forEach(v => { v.pause?.(); v.remove(); });
@@ -3905,6 +3914,28 @@ class TimelineEditor {
                     break;
                 }
             }
+        }
+        // Rearrange clips: video first, paired audio immediately after, unlinked audio at end
+        if (linked > 0 || unlinkedAudios.length > 0) {
+            const videoClips = this.td.clips.filter(c => c.track_type === "video");
+            const allAudioClips = this.td.clips.filter(c => c.track_type === "audio");
+            const usedAudioIds = new Set();
+            const newClips = [];
+            for (const vClip of videoClips) {
+                newClips.push(vClip);
+                if (vClip.linked_id) {
+                    const aClip = allAudioClips.find(c => c.id === vClip.linked_id);
+                    if (aClip && !usedAudioIds.has(aClip.id)) {
+                        newClips.push(aClip);
+                        usedAudioIds.add(aClip.id);
+                    }
+                }
+            }
+            // Add unlinked audio clips at the end
+            for (const aClip of allAudioClips) {
+                if (!usedAudioIds.has(aClip.id)) newClips.push(aClip);
+            }
+            this.td.clips = newClips;
         }
         if (linked > 0) {
             this._toast(`自动配对 ${linked} 组音视频`, "success");
