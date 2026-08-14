@@ -16,16 +16,28 @@ WEB_DIRECTORY = "./web"
 # 1. Middleware (works before app is frozen)
 # 2. on_response_prepare signal (works even after app is frozen)
 import os
+import time
 from server import PromptServer
 
 _FOLDER_NAME = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
-_BSAI_SCRIPT_TAG = f'<script src="/extensions/{_FOLDER_NAME}/bsai_pp.js"></script>'
+
+# Cache-busting: use file modification time so browser always fetches latest JS
+_js_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "bsai_pp.js")
+_js_version = str(int(os.path.getmtime(_js_path)) if os.path.exists(_js_path) else int(time.time()))
+_BSAI_SCRIPT_TAG = f'<script src="/extensions/{_FOLDER_NAME}/bsai_pp.js?v={_js_version}"></script>'
 
 
 def _inject_script_into_html(html):
     """Inject our script tag into HTML if not already present."""
+    # Check for exact match (same version)
     if _BSAI_SCRIPT_TAG in html:
         return None  # Already injected
+    # Remove any older version of our script tag (stale cache)
+    import re
+    html = re.sub(
+        r'<script[^>]*src="/extensions/' + re.escape(_FOLDER_NAME) + r'/bsai_pp\.js[^"]*"[^>]*></script>',
+        '', html
+    )
     if "</head>" in html:
         return html.replace("</head>", _BSAI_SCRIPT_TAG + "</head>")
     if "</body>" in html:
@@ -93,6 +105,9 @@ try:
             modified = _inject_script_into_html(html)
             if modified is not None:
                 response.body = modified.encode("utf-8")
+                # Prevent browser from caching HTML with stale script tags
+                response.headers["Cache-Control"] = "no-store, must-revalidate"
+                response.headers["Pragma"] = "no-cache"
         except Exception as e:
             print(f"[BSAI Premiere Pro] Response injection failed: {e}")
 

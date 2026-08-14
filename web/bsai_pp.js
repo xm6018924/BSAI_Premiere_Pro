@@ -4128,6 +4128,39 @@ function _registerBsaiPP() {
             console.error("[BSAI Premiere Pro] Fallback: max attempts (30) reached. Node type '" + NODE_TYPE + "' not found.");
         }
     }, 500);
+
+    // ── Continuous button visibility guard ──
+    // Periodically check all BSAI nodes and ensure buttons are visible.
+    // This handles late node creation, graph load/restore, and any edge case
+    // where onDrawForeground or computeSize hooks were lost.
+    setInterval(() => {
+        try {
+            const canvas = app.canvas || window.canvas;
+            if (!canvas || !canvas.graph || !canvas.graph._nodes) return;
+            for (const node of canvas.graph._nodes) {
+                if (node.type !== NODE_TYPE) continue;
+                // Check if hooks are applied to this node's prototype
+                if (!node.constructor?.prototype?._bsai_hooks_applied) {
+                    const lg = window.LiteGraph;
+                    const nt = lg?.registered_node_types?.[NODE_TYPE];
+                    if (nt && !nt.prototype._bsai_hooks_applied) {
+                        console.log("[BSAI Premiere Pro] Re-applying hooks (guard)");
+                        _bsaiExt.beforeRegisterNodeDef(nt, { name: NODE_TYPE }, app);
+                    }
+                }
+                // Force resize and redraw if buttons area is too small
+                const BTN_H = 26, BTN_GAP = 4, BTN_MARGIN = 10;
+                const BTN_EXTRA = BTN_H * 2 + BTN_GAP + BTN_MARGIN;
+                const expectedMinH = (node.computeSize?.() || [0, 260])[1];
+                if (node.size[1] < expectedMinH - 5) {
+                    node.setSize([Math.max(420, node.size[0]), Math.max(expectedMinH, 260)]);
+                }
+                node.setDirtyCanvas?.(true, true);
+            }
+        } catch (e) {
+            // Silent - guard should not spam console
+        }
+    }, 3000);
     } catch (e) {
         console.error("[BSAI Premiere Pro] Extension registration failed:", e);
     }
