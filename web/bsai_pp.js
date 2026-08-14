@@ -4786,6 +4786,7 @@ function _registerBsaiPP() {
 
         // Mark hooks as applied so the fallback can detect
         nodeType.prototype._bsai_hooks_applied = true;
+        nodeType.prototype.onDrawForeground._bsai = true;
     },
     };
     app.registerExtension(_bsaiExt);
@@ -4801,7 +4802,7 @@ function _registerBsaiPP() {
             const lg = window.LiteGraph;
             if (lg && lg.registered_node_types && lg.registered_node_types[NODE_TYPE]) {
                 const nt = lg.registered_node_types[NODE_TYPE];
-                if (!nt.prototype._bsai_hooks_applied) {
+                if (!nt.prototype._bsai_hooks_applied || !nt.prototype.onDrawForeground?._bsai) {
                     console.log("[BSAI Premiere Pro] Applying hooks to pre-registered node type (attempt " + _fallbackAttempts + ")");
                     _bsaiExt.beforeRegisterNodeDef(nt, { name: NODE_TYPE }, app);
                 }
@@ -4841,12 +4842,12 @@ function _registerBsaiPP() {
             if (!canvas || !canvas.graph || !canvas.graph._nodes) return;
             for (const node of canvas.graph._nodes) {
                 if (node.type !== NODE_TYPE) continue;
-                // Check if hooks are applied to this node's prototype
-                if (!node.constructor?.prototype?._bsai_hooks_applied) {
+                // Check if onDrawForeground is still our function (not overwritten)
+                if (!node.onDrawForeground || !node.onDrawForeground._bsai) {
                     const lg = window.LiteGraph;
                     const nt = lg?.registered_node_types?.[NODE_TYPE];
-                    if (nt && !nt.prototype._bsai_hooks_applied) {
-                        console.log("[BSAI Premiere Pro] Re-applying hooks (guard)");
+                    if (nt && (!nt.prototype._bsai_hooks_applied || !nt.prototype.onDrawForeground?._bsai)) {
+                        console.log("[BSAI Premiere Pro] Re-applying hooks (guard: onDrawForeground missing)");
                         _bsaiExt.beforeRegisterNodeDef(nt, { name: NODE_TYPE }, app);
                     }
                 }
@@ -4862,7 +4863,7 @@ function _registerBsaiPP() {
         } catch (e) {
             // Silent - guard should not spam console
         }
-    }, 3000);
+    }, 1000);
     } catch (e) {
         console.error("[BSAI Premiere Pro] Extension registration failed:", e);
     }
