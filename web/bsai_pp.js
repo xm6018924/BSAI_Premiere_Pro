@@ -1404,9 +1404,11 @@ class TimelineEditor {
                 video.pause();
                 video.ontimeupdate = null;
                 video.onended = null;
+                video.onloadedmetadata = null;
                 video.style.transform = "";
                 video.style.width = "";
                 video.style.height = "";
+                video.style.objectFit = "";
             }
             this._previewVideoActive = false;
             this._previewZoom = 1;
@@ -1772,34 +1774,103 @@ class TimelineEditor {
 
     async _browseDirectory() {
         const oldDir = this._getWidgetValue("watch_directory", "");
-        // Use native directory picker via hidden input with webkitdirectory
-        const input = document.createElement("input");
-        input.type = "file";
-        input.setAttribute("webkitdirectory", "");
-        input.style.display = "none";
-        document.body.appendChild(input);
+        // Server-side directory browser dialog
+        const overlay = document.createElement("div");
+        overlay.className = "bsai-pp-dialog-overlay";
+        const dialog = document.createElement("div");
+        dialog.className = "bsai-pp-import-dialog";
+        dialog.style.minWidth = "500px";
+        dialog.style.maxWidth = "90vw";
+        dialog.style.maxHeight = "80vh";
+        dialog.style.display = "flex";
+        dialog.style.flexDirection = "column";
+        dialog.innerHTML = `
+            <h3>📁 选择监视目录</h3>
+            <div style="display:flex;gap:6px;margin-bottom:8px;align-items:center;">
+                <input type="text" class="bsai-pp-dir-input" placeholder="输入或粘贴目录路径..." style="flex:1;background:#1a1a1a;border:1px solid #444;color:#e0e0e0;padding:6px 10px;border-radius:4px;font-size:12px;">
+                <button class="bsai-pp-btn bsai-pp-btn-primary" data-act="go">前往</button>
+            </div>
+            <div class="bsai-pp-breadcrumb" data-breadcrumb></div>
+            <div class="bsai-pp-dir-list" data-dir-list style="flex:1;overflow-y:auto;max-height:400px;background:#1a1a1a;border:1px solid #333;border-radius:4px;padding:4px;"></div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
+                <button class="bsai-pp-btn" data-cancel>取消</button>
+                <button class="bsai-pp-btn bsai-pp-btn-primary" data-confirm>确定选择此目录</button>
+            </div>`;
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+        _addMaximizeBtn(dialog);
 
-        input.onchange = async () => {
-            const files = Array.from(input.files || []);
-            document.body.removeChild(input);
-            if (files.length === 0) return;
-            // Extract directory path from the first file's webkitRelativePath
-            // The actual file path is in file.path (if available) or we derive the directory
-            const firstFile = files[0];
-            // webkitRelativePath gives relative path like "folder/sub/file.mp4"
-            // The full path is in file.path on Electron/CEF environments
-            let selected = "";
-            if (firstFile.path) {
-                // Remove the filename to get directory path
-                const fullPath = firstFile.path;
-                const lastSep = Math.max(fullPath.lastIndexOf("\\"), fullPath.lastIndexOf("/"));
-                selected = lastSep >= 0 ? fullPath.substring(0, lastSep) : fullPath;
-            } else {
-                // Fallback: use webkitRelativePath top folder
-                const relPath = firstFile.webkitRelativePath || "";
-                const topFolder = relPath.split("/")[0];
-                selected = topFolder || "";
+        let currentPath = oldDir || "";
+        const pathInput = dialog.querySelector(".bsai-pp-dir-input");
+        const breadcrumbEl = dialog.querySelector("[data-breadcrumb]");
+        const listEl = dialog.querySelector("[data-dir-list]");
+
+        const loadDir = async (path) => {
+            currentPath = path || "";
+            pathInput.value = currentPath;
+            listEl.innerHTML = '<div style="color:#666;padding:10px;">加载中...</div>';
+            try {
+                const resp = await api.fetchApi(`/bsai_premiere_pro/browse?path=${encodeURIComponent(currentPath)}`);
+                const data = await resp.json();
+                if (data.error) {
+                    listEl.innerHTML = `<div style="color:#f66;padding:10px;">${escapeHtml(data.error)}</div>`;
+                    return;
+                }
+                // Render breadcrumb
+                let bcHtml = "";
+                if (data.is_root) {
+                    bcHtml = `<span class="bsai-pp-breadcrumb-current">此电脑</span>`;
+                } else {
+                    const parts = currentPath.split(/[\\/]/).filter(p => p);
+                    let builtPath = "";
+                    bcHtml = `<span class="bsai-pp-breadcrumb-item" data-path="">此电脑</span>`;
+                    for (let i = 0; i < parts.length; i++) {
+                        builtPath = i === 0 ? parts[i] + "\\" : builtPath + "\\" + parts[i];
+                        const isLast = i === parts.length - 1;
+                        bcHtml += `<span class="bsai-pp-breadcrumb-sep">›</span>`;
+                        bcHtml += isLast
+                            ? `<span class="bsai-pp-breadcrumb-current">${escapeHtml(parts[i])}</span>`
+                            : `<span class="bsai-pp-breadcrumb-item" data-path="${escapeHtml(builtPath)}">${escapeHtml(parts[i])}</span>`;
+                    }
+                }
+                breadcrumbEl.innerHTML = bcHtml;
+                breadcrumbEl.querySelectorAll(".bsai-pp-breadcrumb-item").forEach(item => {
+                    item.onclick = () => loadDir(item.getAttribute("data-path") || "");
+                });
+
+                // Render directory list
+                let listHtml = "";
+                if (data.parent !== undefined && data.parent !== "" && !data.is_root) {
+                    listHtml += `<div class="bsai-pp-dir-item" data-path="${escapeHtml(data.parent)}" style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;border-radius:3px;color:#4a90d9;font-size:13px;">📁 <span>..</span></div>`;
+                }
+                for (const dir of (data.dirs || [])) {
+                    listHtml += `<div class="bsai-pp-dir-item" data-path="${escapeHtml(data.is_root ? dir : (currentPath ? currentPath.replace(/[\\/]+$/, "") + "\\" + dir : dir))}" style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;border-radius:3px;color:#ccc;font-size:13px;">📁 <span>${escapeHtml(dir)}</span></div>`;
+                }
+                listEl.innerHTML = listHtml || '<div style="color:#555;padding:10px;">没有子目录</div>';
+                listEl.querySelectorAll(".bsai-pp-dir-item").forEach(item => {
+                    item.onmouseenter = () => item.style.background = "#2a3a4a";
+                    item.onmouseleave = () => item.style.background = "";
+                    item.ondblclick = () => loadDir(item.getAttribute("data-path") || "");
+                    item.onclick = () => {
+                        listEl.querySelectorAll(".bsai-pp-dir-item").forEach(i => i.style.background = "");
+                        item.style.background = "#3a5a7a";
+                        currentPath = item.getAttribute("data-path") || "";
+                        pathInput.value = currentPath;
+                    };
+                });
+            } catch (e) {
+                listEl.innerHTML = `<div style="color:#f66;padding:10px;">加载失败: ${escapeHtml(e.message)}</div>`;
             }
+        };
+
+        pathInput.onkeydown = (e) => {
+            if (e.key === "Enter") loadDir(pathInput.value.trim());
+        };
+        dialog.querySelector('[data-act="go"]').onclick = () => loadDir(pathInput.value.trim());
+        dialog.querySelector("[data-cancel]").onclick = () => overlay.remove();
+        dialog.querySelector("[data-confirm]").onclick = () => {
+            const selected = pathInput.value.trim() || currentPath;
+            overlay.remove();
             if (!selected || selected === oldDir) {
                 if (selected === oldDir) this._toast("目录未变化", "info");
                 return;
@@ -1825,7 +1896,6 @@ class TimelineEditor {
                 this.td.audio_tracks = JSON.parse(JSON.stringify(hist.audio_tracks || [{ name: "A1", locked: false, muted: false, solo: false }]));
                 this._toast(`已切换到目录: ${selected} (恢复 ${this.td.clips.length} 个片段)`, "success");
             } else {
-                // New directory: clear timeline and scan
                 this.td.clips = [];
                 this.td.known_files = [];
                 this.td.deleted_files = [];
@@ -1838,12 +1908,12 @@ class TimelineEditor {
             if (w) w.value = selected;
             this._save();
             this._renderAll();
-            // Auto-scan new directory
             if (!hist) {
                 setTimeout(() => this._scanNow(), 100);
             }
         };
-        input.click();
+        // Load initial directory
+        loadDir(oldDir);
     }
 
     _showDirHistory(e) {
@@ -2825,24 +2895,32 @@ class TimelineEditor {
         let isSelecting = false;
         let selBox = null;
         let startX = 0, startY = 0;
-        contentEl.onmousedown = (e) => {
+        let dragStarted = false;
+        const DRAG_THRESHOLD = 5;
+
+        const onMDown = (e) => {
             // Only start box selection if clicking on empty area (not on a clip)
             if (e.target.closest(".bsai-pp-clip-block") || e.target.closest(".bsai-pp-transition-arrow")) return;
+            if (e.button !== 0) return; // left button only
             if (this.batchMode || this.scissorMode) return;
             isSelecting = true;
+            dragStarted = false;
             startX = e.clientX;
             startY = e.clientY;
             const rect = contentEl.getBoundingClientRect();
-            selBox = document.createElement("div");
-            selBox.className = "bsai-pp-select-box";
-            selBox.style.left = (startX - rect.left) + "px";
-            selBox.style.top = (startY - rect.top) + "px";
-            selBox.style.width = "0px";
-            selBox.style.height = "0px";
-            contentEl.appendChild(selBox);
             e.preventDefault();
             const onMove = (ev) => {
                 if (!isSelecting) return;
+                const dx = Math.abs(ev.clientX - startX);
+                const dy = Math.abs(ev.clientY - startY);
+                if (!dragStarted && (dx > DRAG_THRESHOLD || dy > DRAG_THRESHOLD)) {
+                    dragStarted = true;
+                    // Create selection box only after drag threshold is met
+                    selBox = document.createElement("div");
+                    selBox.className = "bsai-pp-select-box";
+                    contentEl.appendChild(selBox);
+                }
+                if (!dragStarted || !selBox) return;
                 const curX = ev.clientX;
                 const curY = ev.clientY;
                 const left = Math.min(startX, curX) - rect.left;
@@ -2858,6 +2936,9 @@ class TimelineEditor {
                 isSelecting = false;
                 document.removeEventListener("mousemove", onMove);
                 document.removeEventListener("mouseup", onUp);
+                if (!dragStarted || !selBox) return;
+                // Check if selBox is still in the DOM
+                if (!selBox.parentNode) return;
                 // Select clips that intersect with the selection box
                 const boxRect = selBox.getBoundingClientRect();
                 const clips = this._getClipsForTrack(trackType, trackIndex);
@@ -2884,6 +2965,7 @@ class TimelineEditor {
                 // Merge into boxSelected (additive selection)
                 for (const idx of newSelected) this.boxSelected.add(idx);
                 selBox.remove();
+                selBox = null;
                 if (this.boxSelected.size > 0) {
                     this._renderTimeline();
                     this._renderBoxBar();
@@ -2892,6 +2974,8 @@ class TimelineEditor {
             document.addEventListener("mousemove", onMove);
             document.addEventListener("mouseup", onUp);
         };
+        // Use addEventListener to avoid overwriting other handlers
+        contentEl.addEventListener("mousedown", onMDown);
     }
 
     _renderBoxBar() {
@@ -3110,7 +3194,72 @@ class TimelineEditor {
         const panel = this.modal.querySelector("[data-edit]");
         if (!panel) return;
         if (this.selectedIndex < 0 || this.selectedIndex >= (this.td.clips || []).length) {
-            panel.innerHTML = `<div class="bsai-pp-no-selection">点击时间轴中的片段进行编辑</div>`;
+            // Show global settings panel when no clip is selected
+            const videoClips = (this.td.clips || []).filter(c => c.track_type === "video");
+            const totalDur = videoClips.reduce((s, c) => s + (c.trim_end - c.trim_start), 0);
+            const outputName = this._getWidgetValue("output_filename", "premiere_pro_output");
+            const frameRate = this._getWidgetValue("frame_rate", 24);
+            const defaultTrans = this._getWidgetValue("default_transition", "fade");
+            const transDur = this._getWidgetValue("transition_duration", 0.5);
+            panel.innerHTML = `
+                <div class="bsai-pp-edit-row">
+                    <label>输出文件名</label>
+                    <input type="text" value="${escapeHtml(outputName)}" data-global="output_filename" style="flex:1;min-width:150px;">
+                </div>
+                <div class="bsai-pp-edit-row">
+                    <label>帧率</label>
+                    <input type="number" min="1" max="120" step="1" value="${frameRate}" data-global="frame_rate" style="width:70px;">
+                    <label>默认过渡</label>
+                    <select data-global="default_transition">
+                        ${TRANSITIONS.map(t => `<option value="${t}" ${t === defaultTrans ? "selected" : ""}>${TRANSITION_LABELS[t]}</option>`).join("")}
+                    </select>
+                    <label>过渡时长</label>
+                    <input type="number" min="0" max="5" step="0.1" value="${transDur}" data-global="transition_duration" style="width:70px;">
+                </div>
+                <div class="bsai-pp-edit-row">
+                    <label>片段总数</label>
+                    <span style="color:#4a90d9;font-size:13px;font-weight:600;">${videoClips.length} 个视频</span>
+                    <label>总时长</label>
+                    <span style="color:#4caf50;font-size:13px;font-weight:600;">${formatTime(totalDur)}</span>
+                </div>
+                <div class="bsai-pp-clip-actions">
+                    <button class="bsai-pp-btn" data-act="scan">🔍 扫描目录</button>
+                    <button class="bsai-pp-btn" data-act="manual-import">📥 导入文件</button>
+                    <button class="bsai-pp-btn" data-act="play" id="bsai-pp-play-btn2">▶️ 播放</button>
+                    <button class="bsai-pp-btn bsai-pp-btn-primary" data-act="render">🎞️ 渲染输出</button>
+                    <button class="bsai-pp-btn bsai-pp-btn-danger" data-act="clear-all">🗑 清空全部</button>
+                </div>
+                <div style="color:#666;font-size:11px;margin-top:8px;">💡 点击时间轴中的片段可编辑其参数</div>`;
+            // Attach global setting handlers
+            panel.querySelectorAll("[data-global]").forEach(input => {
+                const field = input.getAttribute("data-global");
+                const handler = () => {
+                    let val;
+                    if (input.type === "checkbox") val = input.checked;
+                    else if (input.type === "number") val = parseFloat(input.value) || 0;
+                    else val = input.value;
+                    const w = this._getWidget(field);
+                    if (w) w.value = val;
+                    this.td[field] = val;
+                    this._save();
+                    if (field === "default_transition" || field === "transition_duration") {
+                        this._renderTimeline();
+                    }
+                };
+                input.onchange = handler;
+                if (input.type === "range") input.oninput = handler;
+            });
+            // Attach action button handlers
+            const scanBtn = panel.querySelector('[data-act="scan"]');
+            if (scanBtn) scanBtn.onclick = () => this._scanNow();
+            const importBtn = panel.querySelector('[data-act="manual-import"]');
+            if (importBtn) importBtn.onclick = () => this._manualImport();
+            const playBtn = panel.querySelector('[data-act="play"]');
+            if (playBtn) playBtn.onclick = () => this._togglePlayback();
+            const renderBtn = panel.querySelector('[data-act="render"]');
+            if (renderBtn) renderBtn.onclick = () => this._renderVideo();
+            const clearBtn = panel.querySelector('[data-act="clear-all"]');
+            if (clearBtn) clearBtn.onclick = () => this._clearAllClips();
             return;
         }
         const clip = this.td.clips[this.selectedIndex];
@@ -3443,7 +3592,7 @@ class TimelineEditor {
     }
 
     async _manualImport() {
-        // Use native Windows file picker via hidden input element
+        // Use native Windows file picker, then upload files to server
         const input = document.createElement("input");
         input.type = "file";
         input.multiple = true;
@@ -3455,11 +3604,9 @@ class TimelineEditor {
             const files = Array.from(input.files || []);
             document.body.removeChild(input);
             if (files.length === 0) return;
-            this._toast(`正在导入 ${files.length} 个文件...`, "info");
+            this._toast(`正在上传 ${files.length} 个文件...`, "info");
             let imported = 0;
             for (const file of files) {
-                // Convert File object to path - use file path if available, otherwise use name
-                const filePath = file.path || file.name;
                 const isVideo = /\.(mp4|avi|mov|mkv|webm|flv|wmv|m4v|mpg|mpeg|ts|3gp)$/i.test(file.name);
                 const isAudio = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(file.name);
                 if (!isVideo && !isAudio) {
@@ -3467,22 +3614,24 @@ class TimelineEditor {
                     continue;
                 }
                 try {
-                    const metaResp = await api.fetchApi(`/bsai_premiere_pro/metadata?file=${encodeURIComponent(filePath)}`);
-                    const meta = await metaResp.json();
-                    if (meta.error) {
-                        this._toast(`无法读取 ${file.name}: ${meta.error}`, "error");
+                    // Upload file to server via multipart form data
+                    const formData = new FormData();
+                    formData.append("file", file, file.name);
+                    const resp = await api.fetchApi("/bsai_premiere_pro/upload", {
+                        method: "POST",
+                        body: formData,
+                    });
+                    const result = await resp.json();
+                    if (result.error) {
+                        this._toast(`上传 ${file.name} 失败: ${result.error}`, "error");
                         continue;
                     }
-                    await this._addClipFromFile({
-                        file_path: filePath,
-                        file_name: file.name,
-                        size: file.size,
-                        duration: meta.duration || 0,
-                        width: meta.width || 1920,
-                        height: meta.height || 1080,
-                        fps: meta.fps || 30,
-                        has_audio: meta.has_audio || false,
-                    });
+                    const fileInfo = (result.files || [])[0];
+                    if (!fileInfo || fileInfo.error) {
+                        this._toast(`上传 ${file.name} 失败: ${fileInfo?.error || "无返回数据"}`, "error");
+                        continue;
+                    }
+                    await this._addClipFromFile(fileInfo);
                     imported++;
                 } catch (e) {
                     this._toast(`导入 ${file.name} 失败: ${e.message}`, "error");
@@ -3869,46 +4018,52 @@ class TimelineEditor {
         const video = this.modal.querySelector("[data-preview-video]");
         if (overlay && video) {
             video.src = `/view?filename=${encodeURIComponent(filename)}&type=output`;
-            // Set previewVideoActive BEFORE stopPlayback so it won't hide the overlay
             this._previewVideoActive = true;
-            // Stop any timeline playback first
             this._stopPlayback();
-            // Now show the overlay in fullscreen
             overlay.classList.add("visible");
             overlay.classList.add("fullscreen");
             const enlargeBtn = this.modal.querySelector('[data-act="enlarge-preview"]');
             if (enlargeBtn) enlargeBtn.textContent = "🗗";
             const infoEl = this.modal.querySelector("[data-preview-info]");
             if (infoEl) infoEl.textContent = `🎞️ 渲染结果: ${filename}`;
-            // Reset zoom
             this._previewZoom = 1;
             video.style.transform = "";
-            // Adapt video element size to match video aspect ratio (no black bars, no cropping)
-            video.style.width = "auto";
-            video.style.height = "auto";
-            video.style.maxWidth = "100%";
-            video.style.maxHeight = "100%";
-            video.style.objectFit = "contain";
+            // Reset overlay to fill modal
+            overlay.style.width = "100%";
+            overlay.style.height = "100%";
+            overlay.style.left = "0";
+            overlay.style.top = "0";
+            // Adapt overlay + video to match video aspect ratio (no black bars)
             video.onloadedmetadata = () => {
                 const vw = video.videoWidth || 1920;
                 const vh = video.videoHeight || 1080;
                 const aspect = vw / vh;
-                const maxW = overlay.clientWidth;
-                const maxH = overlay.clientHeight;
+                const modal = this.modal.querySelector(".bsai-pp-modal");
+                const maxW = (modal?.clientWidth || overlay.clientWidth) - 4;
+                const maxH = (modal?.clientHeight || overlay.clientHeight) - 4;
                 const containerAspect = maxW / maxH;
+                // Size overlay to match video aspect ratio, centered in modal
+                let overlayW, overlayH;
                 if (aspect > containerAspect) {
                     // Wider video: fit width
-                    video.style.width = "100%";
-                    video.style.height = "auto";
+                    overlayW = maxW;
+                    overlayH = maxW / aspect;
                 } else {
                     // Taller video: fit height
-                    video.style.height = "100%";
-                    video.style.width = "auto";
+                    overlayH = maxH;
+                    overlayW = maxH * aspect;
                 }
-                video.style.objectFit = "fill"; // fill the element exactly (element already matches ratio)
+                overlay.style.width = overlayW + "px";
+                overlay.style.height = overlayH + "px";
+                overlay.style.left = "50%";
+                overlay.style.top = "50%";
+                overlay.style.transform = "translate(-50%, -50%)";
+                // Video fills overlay exactly (aspect ratios match, so no distortion)
+                video.style.width = "100%";
+                video.style.height = "100%";
+                video.style.objectFit = "fill";
             };
             video.play().catch(() => {});
-            // Add timeupdate for progress bar
             video.ontimeupdate = () => {
                 const prog = this.modal.querySelector("[data-preview-progress]");
                 if (prog && video.duration > 0) {

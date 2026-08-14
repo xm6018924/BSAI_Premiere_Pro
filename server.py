@@ -362,3 +362,58 @@ async def load_timeline(request):
     node_id = str(request.query.get("node_id", ""))
     data = _timeline_store.get(node_id, '{"clips":[],"known_files":[],"deleted_files":[],"directory_history":{}}')
     return web.json_response({"timeline_data": data})
+
+
+@PromptServer.instance.routes.post("/bsai_premiere_pro/upload")
+async def upload_file(request):
+    """Upload one or more media files and return their saved paths + metadata."""
+    import asyncio
+    import tempfile
+    try:
+        import folder_paths
+        output_dir = os.path.join(folder_paths.base_path, "output", "bsai_imports")
+    except Exception:
+        output_dir = os.path.join(tempfile.gettempdir(), "bsai_imports")
+    os.makedirs(output_dir, exist_ok=True)
+
+    reader = await request.multipart()
+    results = []
+    while True:
+        part = await reader.next()
+        if part is None:
+            break
+        if part.filename is None:
+            continue
+        # Sanitize filename
+        filename = os.path.basename(part.filename)
+        save_path = os.path.join(output_dir, filename)
+        # Handle duplicate names
+        base, ext = os.path.splitext(filename)
+        counter = 1
+        while os.path.exists(save_path):
+            save_path = os.path.join(output_dir, f"{base}_{counter}{ext}")
+            counter += 1
+        # Save file in chunks
+        try:
+            with open(save_path, "wb") as f:
+                while True:
+                    chunk = await part.read_chunk(8192)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+        except Exception as e:
+            results.append({"file_name": filename, "error": str(e)})
+            continue
+        # Get metadata (video/audio info)
+        info = await asyncio.to_thread(get_video_info, save_path)
+        results.append({
+            "file_path": save_path,
+            "file_name": os.path.basename(save_path),
+            "size": os.path.getsize(save_path),
+            "duration": (info or {}).get("duration", 0),
+            "width": (info or {}).get("width", 0),
+            "height": (info or {}).get("height", 0),
+            "fps": (info or {}).get("fps", 30),
+            "has_audio": (info or {}).get("has_audio", False),
+        })
+    return web.json_response({"files": results})
