@@ -1696,7 +1696,36 @@ class TimelineEditor {
         if (Math.abs(this._zoomLevel - old) < 0.01) return;
         const display = this.modal.querySelector("[data-zoom-display]");
         if (display) display.textContent = Math.round(this._zoomLevel * 100) + "%";
+
+        // Preserve scroll center: focus on selected clip or current view center
+        const scrollContainer = this.modal.querySelector("[data-timeline-scroll]");
+        const oldPps = this._pps || 15;
+        let focusTime = 0;
+        if (scrollContainer) {
+            if (this.selectedIndex >= 0 && this.td.clips[this.selectedIndex]) {
+                const clip = this.td.clips[this.selectedIndex];
+                const sameTypeClips = this.td.clips.filter(c => c.track_type === clip.track_type);
+                const idx = sameTypeClips.indexOf(clip);
+                let startTime = 0;
+                for (let i = 0; i < idx; i++) {
+                    startTime += (sameTypeClips[i].trim_end - sameTypeClips[i].trim_start);
+                }
+                focusTime = startTime + (clip.trim_end - clip.trim_start) / 2;
+            } else {
+                const visW = scrollContainer.clientWidth || 800;
+                focusTime = (scrollContainer.scrollLeft + visW / 2) / oldPps;
+            }
+        }
+
         this._renderTimeline();
+
+        // After render, scroll to keep focusTime centered
+        if (scrollContainer) {
+            const newPps = this._pps || 15;
+            const newCenterPx = focusTime * newPps;
+            const visW = scrollContainer.clientWidth || 800;
+            scrollContainer.scrollLeft = Math.max(0, newCenterPx - visW / 2);
+        }
     }
 
     // Calculate dynamic track heights based on zoom level and available space
