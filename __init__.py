@@ -21,28 +21,34 @@ from server import PromptServer
 
 _FOLDER_NAME = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
 
-# Cache-busting: use file modification time so browser always fetches latest JS
+# Cache-busting: compute version dynamically on every request
+# so browser ALWAYS fetches latest JS even without ComfyUI restart
 _js_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "bsai_pp.js")
-_js_version = str(int(os.path.getmtime(_js_path)) if os.path.exists(_js_path) else int(time.time()))
-_BSAI_SCRIPT_TAG = f'<script src="/extensions/{_FOLDER_NAME}/bsai_pp.js?v={_js_version}"></script>'
+import re
+
+_BSAI_TAG_RE = re.compile(
+    r'<script[^>]*src="/extensions/' + re.escape(_FOLDER_NAME) + r'/bsai_pp\.js[^"]*"[^>]*></script>'
+)
+
+
+def _get_script_tag():
+    """Build script tag with current file mtime (dynamic, not cached)."""
+    v = str(int(os.path.getmtime(_js_path)) if os.path.exists(_js_path) else int(time.time()))
+    return f'<script src="/extensions/{_FOLDER_NAME}/bsai_pp.js?v={v}"></script>'
 
 
 def _inject_script_into_html(html):
-    """Inject our script tag into HTML if not already present."""
-    # Check for exact match (same version)
-    if _BSAI_SCRIPT_TAG in html:
-        return None  # Already injected
+    """Inject our script tag into HTML, always using latest mtime."""
+    tag = _get_script_tag()
+    if tag in html:
+        return None  # Already injected with current version
     # Remove any older version of our script tag (stale cache)
-    import re
-    html = re.sub(
-        r'<script[^>]*src="/extensions/' + re.escape(_FOLDER_NAME) + r'/bsai_pp\.js[^"]*"[^>]*></script>',
-        '', html
-    )
+    html = _BSAI_TAG_RE.sub('', html)
     if "</head>" in html:
-        return html.replace("</head>", _BSAI_SCRIPT_TAG + "</head>")
+        return html.replace("</head>", tag + "</head>")
     if "</body>" in html:
-        return html.replace("</body>", _BSAI_SCRIPT_TAG + "</body>")
-    return html + _BSAI_SCRIPT_TAG
+        return html.replace("</body>", tag + "</body>")
+    return html + tag
 
 
 # Mechanism 1: Middleware (works if app is not yet frozen)
