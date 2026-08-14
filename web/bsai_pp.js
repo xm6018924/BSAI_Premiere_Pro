@@ -951,20 +951,22 @@ class AutoImporter {
                 const vId = `clip_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
                 const aId = `clip_${Date.now() + 1}_${Math.random().toString(36).substr(2, 6)}`;
                 const isAudioOnly = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(file.file_name || "");
+                const hasAudioSuffix = /-audio\.\w+$/i.test(file.file_name || "");
+                const treatAsAudioOnly = isAudioOnly || hasAudioSuffix;
                 const isImage = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(file.file_name || "");
                 const hasAudio = meta.has_audio || false;
                 const clipDuration = isImage ? 5 : (meta.duration || 0);
                 const base = {
                     file_path: file.file_path, file_name: file.file_name,
                     created_time: file.created_time, duration: clipDuration,
-                    width: meta.width || 1920, height: meta.height || 1080, fps: meta.fps || 30,
+                    width: meta.width || (treatAsAudioOnly ? 0 : 1920), height: meta.height || (treatAsAudioOnly ? 0 : 1080), fps: meta.fps || 30,
                     has_audio: hasAudio,
                     trim_start: 0, trim_end: clipDuration,
                     transition_in: "cut", transition_out: "cut", transition_duration: 0.5,
                     audio_replacement: null, audio_fade_in: 0, audio_fade_out: 0,
                     video_enabled: true, audio_enabled: true,
                 };
-                if (isAudioOnly) {
+                if (treatAsAudioOnly) {
                     td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: null, is_video_part: false });
                 } else if (isImage || !hasAudio) {
                     td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: null, is_video_part: true });
@@ -1852,6 +1854,7 @@ class TimelineEditor {
             } else {
                 this._toast("没有成功导入任何文件", "error");
             }
+            this._autoLinkClips();
             this._save();
             this._renderAll();
         };
@@ -2047,6 +2050,7 @@ class TimelineEditor {
             }
         }
         if (imported > 0) {
+            this._autoLinkClips();
             this._save();
             this._renderAll();
             this._toast(`成功导入 ${imported} 个文件`, "success");
@@ -3479,6 +3483,34 @@ class TimelineEditor {
         this._toast("已同步音视频裁剪参数", "success");
     }
 
+    _autoLinkClips() {
+        const unlinkedVideos = this.td.clips.filter(c => c.track_type === "video" && !c.linked_id);
+        const unlinkedAudios = this.td.clips.filter(c => c.track_type === "audio" && !c.linked_id);
+        let linked = 0;
+        for (const audio of unlinkedAudios) {
+            let audioBase = audio.file_name.replace(/\.[^.]+$/, "");
+            audioBase = audioBase.replace(/-audio$/i, "");
+            for (const video of unlinkedVideos) {
+                if (video.linked_id) continue;
+                let videoBase = video.file_name.replace(/\.[^.]+$/, "");
+                if (videoBase === audioBase) {
+                    video.linked_id = audio.id;
+                    audio.linked_id = video.id;
+                    audio.trim_start = video.trim_start;
+                    audio.trim_end = video.trim_end;
+                    audio.transition_in = video.transition_in;
+                    audio.transition_out = video.transition_out;
+                    audio.transition_duration = video.transition_duration;
+                    linked++;
+                    break;
+                }
+            }
+        }
+        if (linked > 0) {
+            this._toast(`自动配对 ${linked} 组音视频`, "success");
+        }
+    }
+
     _renderFooter() {
         const info = this.modal.querySelector("[data-footer-info]");
         if (!info) return;
@@ -3543,6 +3575,8 @@ class TimelineEditor {
             }
             const isImage = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(file.file_name || "");
             const isAudioOnly = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(file.file_name || "");
+            const hasAudioSuffix = /-audio\.\w+$/i.test(file.file_name || "");
+            const treatAsAudioOnly = isAudioOnly || hasAudioSuffix;
             const duration = meta.duration || (isImage ? 5 : 0);
             const hasAudio = meta.has_audio || false;
             const vId = `clip_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
@@ -3551,7 +3585,7 @@ class TimelineEditor {
                 file_path: file.file_path, file_name: file.file_name,
                 created_time: file.created_time || Date.now() / 1000,
                 duration: duration,
-                width: meta.width || (isAudioOnly ? 0 : 1080), height: meta.height || (isAudioOnly ? 0 : 1920), fps: meta.fps || 30,
+                width: meta.width || (treatAsAudioOnly ? 0 : 1080), height: meta.height || (treatAsAudioOnly ? 0 : 1920), fps: meta.fps || 30,
                 has_audio: hasAudio,
                 trim_start: 0, trim_end: duration,
                 transition_in: "fade", transition_out: "fade",
@@ -3559,8 +3593,8 @@ class TimelineEditor {
                 audio_replacement: null, audio_fade_in: 0, audio_fade_out: 0,
                 video_enabled: true, audio_enabled: true,
             };
-            if (isAudioOnly) {
-                // Pure audio: create audio clip only, no video clip
+            if (treatAsAudioOnly) {
+                // Pure audio or -audio suffix file: create audio clip only
                 this.td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: null, is_video_part: false });
             } else if (isImage || !hasAudio) {
                 // Image or video without audio: create video clip only, no audio clip
@@ -3637,6 +3671,7 @@ class TimelineEditor {
             }
             if (imported > 0) {
                 this._toast(`成功导入 ${imported} 个文件`, "success");
+                this._autoLinkClips();
                 this._save();
                 this._renderAll();
                 // Select the last imported clip, don't jump to first video
