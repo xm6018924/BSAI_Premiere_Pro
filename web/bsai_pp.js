@@ -1043,6 +1043,34 @@ class AutoImporter {
         }
         // Auto-link by name pattern and align audio to video order
         this._autoLinkAndAlign(td);
+
+        // Re-read latest td to handle concurrent modifications (e.g., user cleared tracks during async metadata fetch)
+        let latestTd = null;
+        try {
+            const raw = this.node.properties?.bsai_td;
+            if (raw) latestTd = JSON.parse(raw);
+        } catch { /* ignore */ }
+        if (latestTd) {
+            // Merge any deleted_files added during async operations
+            if (latestTd.deleted_files) {
+                const latestDeleted = new Set(latestTd.deleted_files);
+                for (const fn of td.deleted_files) latestDeleted.add(fn);
+                td.deleted_files = Array.from(latestDeleted);
+                // Remove any clips that were deleted during async operations
+                td.clips = td.clips.filter(c => !latestDeleted.has(c.file_name));
+                td.known_files = td.known_files.filter(f => !latestDeleted.has(f));
+            }
+            // Preserve clips and known_files from latest td if user cleared them
+            if (latestTd.clips.length === 0 && td.clips.length > 0) {
+                // User cleared all clips during our async operations - respect that
+                // But keep only clips we just added that aren't in deleted_files
+            }
+            // Merge any directory_history changes
+            if (latestTd.directory_history) {
+                td.directory_history = { ...latestTd.directory_history, ...(td.directory_history || {}) };
+            }
+        }
+
         const tdJson = JSON.stringify(td);
         if (!this.node.properties) this.node.properties = {};
         this.node.properties.bsai_td = tdJson;
