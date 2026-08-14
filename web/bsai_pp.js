@@ -1786,12 +1786,14 @@ class TimelineEditor {
         const display = this.modal.querySelector("[data-zoom-display]");
         if (display) display.textContent = Math.round(this._zoomLevel * 100) + "%";
 
-        // Preserve scroll center: focus on selected clip or current view center
+        // Preserve scroll center: focus on playhead, selected clip, or view center
         const scrollContainer = this.modal.querySelector("[data-timeline-scroll]");
         const oldPps = this._pps || 15;
         let focusTime = 0;
         if (scrollContainer) {
-            if (this.selectedIndex >= 0 && this.td.clips[this.selectedIndex]) {
+            if (this._playheadTime !== null && this._playheadTime !== undefined) {
+                focusTime = this._playheadTime;
+            } else if (this.selectedIndex >= 0 && this.td.clips[this.selectedIndex]) {
                 const clip = this.td.clips[this.selectedIndex];
                 const sameTypeClips = this.td.clips.filter(c => c.track_type === clip.track_type);
                 const idx = sameTypeClips.indexOf(clip);
@@ -1811,7 +1813,8 @@ class TimelineEditor {
         // After render, scroll to keep focusTime centered
         if (scrollContainer) {
             const newPps = this._pps || 15;
-            const newCenterPx = focusTime * newPps;
+            const SPACER_W = 150;
+            const newCenterPx = SPACER_W + focusTime * newPps;
             const visW = scrollContainer.clientWidth || 800;
             scrollContainer.scrollLeft = Math.max(0, newCenterPx - visW / 2);
         }
