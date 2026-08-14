@@ -936,7 +936,7 @@ class AutoImporter {
         const unlinkedAudios = td.clips.filter(c => c.track_type === "audio" && !c.linked_id);
         for (const audio of unlinkedAudios) {
             let audioBase = (audio.file_name || "").replace(/\.[^.]+$/, "");
-            audioBase = audioBase.replace(/-audio$/i, "");
+            audioBase = audioBase.replace(/[-_]audio[-_]?\d*$/i, "");
             for (const video of unlinkedVideos) {
                 if (video.linked_id) continue;
                 let videoBase = (video.file_name || "").replace(/\.[^.]+$/, "");
@@ -1013,7 +1013,7 @@ class AutoImporter {
                 const vId = `clip_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
                 const aId = `clip_${Date.now() + 1}_${Math.random().toString(36).substr(2, 6)}`;
                 const isAudioOnly = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(file.file_name || "");
-                const hasAudioSuffix = /-audio\.\w+$/i.test(file.file_name || "");
+                const hasAudioSuffix = /[-_]audio[-_]?\d*\.\w+$/i.test(file.file_name || "");
                 const treatAsAudioOnly = isAudioOnly || hasAudioSuffix;
                 const isImage = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(file.file_name || "");
                 const hasAudio = meta.has_audio || false;
@@ -3889,7 +3889,7 @@ class TimelineEditor {
         let linked = 0;
         for (const audio of unlinkedAudios) {
             let audioBase = audio.file_name.replace(/\.[^.]+$/, "");
-            audioBase = audioBase.replace(/-audio$/i, "");
+            audioBase = audioBase.replace(/[-_]audio[-_]?\d*$/i, "");
             for (const video of unlinkedVideos) {
                 if (video.linked_id) continue;
                 let videoBase = video.file_name.replace(/\.[^.]+$/, "");
@@ -4022,7 +4022,7 @@ class TimelineEditor {
             }
             const isImage = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(file.file_name || "");
             const isAudioOnly = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(file.file_name || "");
-            const hasAudioSuffix = /-audio\.\w+$/i.test(file.file_name || "");
+            const hasAudioSuffix = /[-_]audio[-_]?\d*\.\w+$/i.test(file.file_name || "");
             const treatAsAudioOnly = isAudioOnly || hasAudioSuffix;
             const duration = meta.duration || (isImage ? 5 : 0);
             const hasAudio = meta.has_audio || false;
@@ -4726,6 +4726,7 @@ function _registerBsaiPP() {
                                     if (!fi || fi.error) continue;
                                     const isImg = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(fi.file_name);
                                     const isAudioOnly = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(fi.file_name);
+                                    const hasAudSuffix = /[-_]audio[-_]?\d*\.\w+$/i.test(fi.file_name);
                                     const dur = fi.duration || (isImg ? 5 : 0);
                                     const hasAud = fi.has_audio || false;
                                     const vId = `clip_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
@@ -4741,7 +4742,7 @@ function _registerBsaiPP() {
                                         audio_fade_in: 0, audio_fade_out: 0,
                                         video_enabled: true, audio_enabled: true,
                                     };
-                                    if (isAudioOnly) {
+                                    if (isAudioOnly || hasAudSuffix) {
                                         td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: null, is_video_part: false });
                                     } else if (isImg || !hasAud) {
                                         td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: null, is_video_part: true });
