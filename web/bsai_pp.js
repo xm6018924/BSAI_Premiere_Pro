@@ -181,6 +181,16 @@ const STYLES = `
 .bsai-pp-playhead::before {
     content: "▼"; position: absolute; top: -2px; left: -6px; color: #ff4444; font-size: 10px;
 }
+.bsai-pp-timeline-playhead {
+    position: absolute; top: 0; bottom: 0; width: 2px; background: #ff4444;
+    z-index: 90; pointer-events: auto; cursor: ew-resize;
+    box-shadow: 0 0 6px rgba(255,68,68,0.8);
+}
+.bsai-pp-timeline-playhead::before {
+    content: "▼"; position: absolute; top: 0; left: -6px; color: #ff4444; font-size: 11px;
+    text-shadow: 0 0 4px rgba(255,68,68,0.6);
+}
+.bsai-pp-timeline-container { position: relative; }
 .bsai-pp-clip-block.selected { border-color: #4a90d9; box-shadow: 0 0 8px rgba(74,144,217,0.5); }
 .bsai-pp-clip-block.batch-selected { border-color: #ff6b6b; box-shadow: 0 0 8px rgba(255,107,107,0.6); background: rgba(255,107,107,0.12); }
 .bsai-pp-clip-block.batch-selected::after { content: "✓"; position: absolute; top: 2px; right: 4px; color: #ff6b6b; font-weight: bold; font-size: 12px; }
@@ -1085,6 +1095,7 @@ class TimelineEditor {
         this._pausedVideoTime = null;
         this._previewVideoActive = false;
         this._startClipIndex = 0;
+        this._playheadTime = null;
         this.td = this._load();
     }
 
@@ -1651,6 +1662,25 @@ class TimelineEditor {
         ruler.innerHTML = `<div class="bsai-pp-ruler-spacer"></div><div class="bsai-pp-ruler-marks" style="min-width:${rulerWidth}px">${this._renderRulerMarks(maxDuration)}</div>`;
         container.appendChild(ruler);
 
+        // Click on ruler to set playhead position
+        const rulerMarks = ruler.querySelector(".bsai-pp-ruler-marks");
+        if (rulerMarks) {
+            rulerMarks.style.cursor = "pointer";
+            rulerMarks.addEventListener("click", (e) => {
+                const rect = rulerMarks.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const pps = this._pps || 15;
+                const scrollContainer = this.modal.querySelector("[data-timeline-scroll]");
+                const scrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
+                const totalX = x + scrollLeft;
+                this._playheadTime = totalX / pps;
+                this._renderTimelinePlayhead();
+                if (this.scissorMode) {
+                    this._cutAtPlayhead();
+                }
+            });
+        }
+
         const vLabel = document.createElement("div");
         vLabel.className = "bsai-pp-track-section-label";
         vLabel.innerHTML = `<span>📹 视频轨道</span>`;
@@ -1675,6 +1705,8 @@ class TimelineEditor {
         }
         // Auto-load thumbnails after timeline render so they always appear
         this._loadThumbnails();
+        // Render persistent playhead if set
+        this._renderTimelinePlayhead();
     }
 
     _renderRulerMarks(totalDuration) {
@@ -2510,6 +2542,100 @@ class TimelineEditor {
     _removePlayhead() {
         const existing = this.modal.querySelector(".bsai-pp-playhead");
         if (existing) existing.remove();
+    }
+
+    _renderTimelinePlayhead() {
+        const container = this.modal.querySelector("[data-track-container]");
+        if (!container) return;
+        const old = container.querySelector(".bsai-pp-timeline-playhead");
+        if (old) old.remove();
+        if (this._playheadTime === null || this._playheadTime === undefined) return;
+        const pps = this._pps || 15;
+        const x = this._playheadTime * pps;
+        const ph = document.createElement("div");
+        ph.className = "bsai-pp-timeline-playhead";
+        ph.style.left = x + "px";
+        ph.title = `播放头: ${formatTime(this._playheadTime)} (双击清除)`;
+        ph.addEventListener("dblclick", (e) => {
+            e.stopPropagation();
+            this._playheadTime = null;
+            this._renderTimelinePlayhead();
+        });
+        ph.addEventListener("click", (e) => {
+            e.stopPropagation();
+            if (this.scissorMode) {
+                this._cutAtPlayhead();
+            }
+        });
+        container.appendChild(ph);
+    }
+
+    _cutAtPlayhead() {
+        if (this._playheadTime === null || this._playheadTime === undefined) {
+            this._toast("请先点击标尺设置播放头位置", "info");
+            return;
+        }
+        const cutTime = this._playheadTime;
+        const videoClips = this.td.clips.filter(c => c.track_type === "video");
+        let cutCount = 0;
+        for (const clip of videoClips) {
+            if (this._isTrackLocked(clip)) continue;
+            const clipStart = this._getClipStartTime(clip);
+            const clipEnd = clipStart + (clip.trim_end - clip.trim_start);
+            if (cutTime > clipStart + 0.2 && cutTime < clipEnd - 0.2) {
+                const splitTime = (clip.trim_start || 0) + (cutTime - clipStart);
+                const clipIndex = this.td.clips.indexOf(clip);
+                this._splitClipAt(clip, clipIndex, splitTime);
+                cutCount++;
+            }
+        }
+        if (cutCount > 0) {
+            this._save();
+            this._renderAll();
+            this._toast(`已在播放头位置剪断 ${cutCount} 个片段`, "success");
+        } else {
+            this._toast("播放头位置没有可剪断的视频片段", "info");
+        }
+    }
+
+    _getClipStartTime(clip) {
+        const sameType = this.td.clips.filter(c => c.track_type === clip.track_type);
+        const idx = sameType.indexOf(clip);
+        let startTime = 0;
+        for (let i = 0; i < idx; i++) {
+            startTime += (sameType[i].trim_end - sameType[i].trim_start);
+        }
+        return startTime;
+    }
+
+    _splitClipAt(clip, clipIndex, splitTime) {
+        const vId2 = `clip_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+        const aId2 = `clip_${Date.now() + 1}_${Math.random().toString(36).substr(2, 6)}`;
+        const part2 = { ...clip, id: vId2, trim_start: splitTime, transition_in: "cut", transition_out: clip.transition_out };
+        clip.trim_end = splitTime;
+        clip.transition_out = "cut";
+        const insertIdx = clipIndex + 1;
+        const linkedAudio = clip.linked_id ? this.td.clips.find(c => c.id === clip.linked_id) : null;
+        const isAudioLocked = linkedAudio ? this._isTrackLocked(linkedAudio) : false;
+        const willSplitAudio = linkedAudio && !isAudioLocked;
+        if (willSplitAudio) {
+            const linked = linkedAudio;
+            const linkedOrigTransOut = linked.transition_out;
+            const linkedOrigTrimEnd = linked.trim_end;
+            const linkedIdx = this.td.clips.indexOf(linked);
+            const linkedPart2 = { ...linked, id: aId2, trim_start: splitTime, trim_end: linkedOrigTrimEnd, transition_in: "cut", transition_out: linkedOrigTransOut };
+            linked.trim_end = splitTime;
+            linked.transition_out = "cut";
+            part2.linked_id = aId2;
+            linkedPart2.linked_id = vId2;
+            this.td.clips.splice(insertIdx, 0, part2);
+            const linkedInsertIdx = linkedIdx < insertIdx ? linkedIdx + 2 : linkedIdx + 1;
+            this.td.clips.splice(linkedInsertIdx, 0, linkedPart2);
+        } else {
+            part2.linked_id = null;
+            if (clip.linked_id) clip.linked_id = null;
+            this.td.clips.splice(insertIdx, 0, part2);
+        }
     }
 
     _toggleBatchMode() {
