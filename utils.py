@@ -8,8 +8,10 @@ import time
 import base64
 import wave
 
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".wmv", ".m4v"}
-AUDIO_EXTENSIONS = {".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".wma"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".wmv", ".m4v", ".mpg", ".mpeg", ".ts", ".3gp"}
+AUDIO_EXTENSIONS = {".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".wma", ".opus"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".svg"}
+MEDIA_EXTENSIONS = VIDEO_EXTENSIONS | AUDIO_EXTENSIONS | IMAGE_EXTENSIONS
 
 
 def find_ffmpeg():
@@ -262,7 +264,7 @@ def scan_video_directory(directory, recursive=True):
                     _scan_dir(full_path)
                     continue
                 ext = os.path.splitext(f)[1].lower()
-                if ext not in VIDEO_EXTENSIONS:
+                if ext not in MEDIA_EXTENSIONS:
                     continue
                 try:
                     stat = os.stat(full_path)

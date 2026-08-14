@@ -299,7 +299,7 @@ const STYLES = `
     width: 100%; height: 100%; top: 0; left: 0; transform: none;
 }
 .bsai-pp-timeline-preview video {
-    width: 100%; height: 100%; object-fit: cover; object-position: center; background: #000;
+    width: 100%; height: 100%; object-fit: contain; object-position: center; background: #000;
     transition: transform 0.1s ease;
 }
 .bsai-pp-timeline-preview .preview-close {
@@ -922,11 +922,11 @@ class AutoImporter {
 
     async addNewFiles(files) {
         let td;
-        try { td = JSON.parse(this.node.properties?.bsai_td || '{}'); } catch { td = { clips: [], known_files: [], filter_audio_only: true }; }
+        try { td = JSON.parse(this.node.properties?.bsai_td || '{}'); } catch { td = { clips: [], known_files: [], filter_audio_only: false }; }
         if (!td.clips) td.clips = [];
         if (!td.known_files) td.known_files = [];
         if (!td.deleted_files) td.deleted_files = [];
-        if (td.filter_audio_only === undefined) td.filter_audio_only = true;
+        if (td.filter_audio_only === undefined) td.filter_audio_only = false;
         if (!td.video_tracks) td.video_tracks = [{ name: "V1", locked: false, visible: true }];
         if (!td.audio_tracks) td.audio_tracks = [{ name: "A1", locked: false, muted: false, solo: false }];
         if (td.clips.length > 0 && !td.clips[0].track_type) {
@@ -950,18 +950,28 @@ class AutoImporter {
                 }
                 const vId = `clip_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
                 const aId = `clip_${Date.now() + 1}_${Math.random().toString(36).substr(2, 6)}`;
+                const isAudioOnly = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(file.file_name || "");
+                const isImage = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(file.file_name || "");
+                const hasAudio = meta.has_audio || false;
+                const clipDuration = isImage ? 5 : (meta.duration || 0);
                 const base = {
                     file_path: file.file_path, file_name: file.file_name,
-                    created_time: file.created_time, duration: meta.duration || 0,
+                    created_time: file.created_time, duration: clipDuration,
                     width: meta.width || 1920, height: meta.height || 1080, fps: meta.fps || 30,
-                    has_audio: meta.has_audio || false,
-                    trim_start: 0, trim_end: meta.duration || 0,
+                    has_audio: hasAudio,
+                    trim_start: 0, trim_end: clipDuration,
                     transition_in: "cut", transition_out: "cut", transition_duration: 0.5,
                     audio_replacement: null, audio_fade_in: 0, audio_fade_out: 0,
                     video_enabled: true, audio_enabled: true,
                 };
-                td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: aId, is_video_part: true });
-                td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: vId, is_video_part: false });
+                if (isAudioOnly) {
+                    td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: null, is_video_part: false });
+                } else if (isImage || !hasAudio) {
+                    td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: null, is_video_part: true });
+                } else {
+                    td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: aId, is_video_part: true });
+                    td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: vId, is_video_part: false });
+                }
                 td.known_files.push(file.file_name);
             } catch (e) {
                 console.error("[BSAI PP] Failed to add file:", file.file_name, e);
@@ -1031,7 +1041,7 @@ class TimelineEditor {
                 if (!td.known_files) td.known_files = [];
                 if (!td.deleted_files) td.deleted_files = [];
                 if (!td.directory_history) td.directory_history = {};
-                if (td.filter_audio_only === undefined) td.filter_audio_only = true;
+                if (td.filter_audio_only === undefined) td.filter_audio_only = false;
                 if (!td.video_tracks) td.video_tracks = [{ name: "V1", locked: false, visible: true }];
                 if (!td.audio_tracks) td.audio_tracks = [{ name: "A1", locked: false, muted: false, solo: false }];
                 if (td.clips.length > 0 && !td.clips[0].track_type) {
@@ -2231,8 +2241,38 @@ class TimelineEditor {
         // Create inline video element inside the clip block's thumbnail
         const video = document.createElement("video");
         video.className = "bsai-pp-inline-video";
-        video.style.cssText = "width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0;background:#000;z-index:5;";
+        video.style.cssText = "width:100%;height:100%;object-fit:contain;position:absolute;top:0;left:0;background:#000;z-index:5;";
         video.src = videoSrc;
+
+        // Determine if audio should be muted:
+        // 1. Video clip's linked audio was deleted (linked_id is null but has_audio)
+        // 2. Linked audio clip is a gap placeholder
+        // 3. Audio track is muted
+        let shouldMute = false;
+        if (clip.has_audio !== false) {
+            if (!clip.linked_id) {
+                // Audio was unlinked/deleted - mute the video's embedded audio
+                shouldMute = true;
+            } else {
+                const linkedAudio = this.td.clips.find(c => c.id === clip.linked_id);
+                if (!linkedAudio || linkedAudio.is_gap) {
+                    shouldMute = true;
+                } else if (linkedAudio.audio_enabled === false) {
+                    shouldMute = true;
+                }
+            }
+        }
+        // Check if the audio track itself is muted
+        if (!shouldMute && clip.linked_id) {
+            const linkedAudio = this.td.clips.find(c => c.id === clip.linked_id);
+            if (linkedAudio && linkedAudio.track_index != null) {
+                const audioTracks = this.td.audio_tracks || [];
+                const aTrack = audioTracks[linkedAudio.track_index];
+                if (aTrack && aTrack.muted) shouldMute = true;
+            }
+        }
+        video.muted = shouldMute;
+
         thumbDiv.appendChild(video);
 
         // Apply position offset
@@ -4001,7 +4041,7 @@ class TimelineEditor {
             overlay.style.transform = "none";
             video.style.width = "100%";
             video.style.height = "100%";
-            video.style.objectFit = "cover";
+            video.style.objectFit = "contain";
             video.style.objectPosition = "center";
             video.play().catch(() => {});
             video.ontimeupdate = () => {
