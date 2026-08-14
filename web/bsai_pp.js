@@ -979,8 +979,8 @@ class AutoImporter {
         const usedAudioIds = new Set();
         const newClips = [];
         // Place unlinked audio at the beginning (aligned with first video)
-        const unlinkedAudios = allAudioClips.filter(a => !a.linked_id);
-        for (const aClip of unlinkedAudios) {
+        const remainingUnlinked = allAudioClips.filter(a => !a.linked_id);
+        for (const aClip of remainingUnlinked) {
             newClips.push(aClip);
             usedAudioIds.add(aClip.id);
         }
@@ -5031,6 +5031,16 @@ function _registerBsaiPP() {
                 if (node.type !== NODE_TYPE) continue;
                 // Check if onDrawForeground is still our function (not overwritten)
                 if (!node.onDrawForeground || !node.onDrawForeground._bsai) {
+                    // Delete instance-level override so prototype function is used
+                    if (node.hasOwnProperty('onDrawForeground')) {
+                        delete node.onDrawForeground;
+                    }
+                    if (node.hasOwnProperty('onMouseDown')) {
+                        delete node.onMouseDown;
+                    }
+                    if (node.hasOwnProperty('computeSize')) {
+                        delete node.computeSize;
+                    }
                     const lg = window.LiteGraph;
                     const nt = lg?.registered_node_types?.[NODE_TYPE];
                     if (nt && (!nt.prototype._bsai_hooks_applied || !nt.prototype.onDrawForeground?._bsai)) {
@@ -5038,7 +5048,7 @@ function _registerBsaiPP() {
                         _bsaiExt.beforeRegisterNodeDef(nt, { name: NODE_TYPE }, app);
                     }
                 }
-                // Force resize and redraw if buttons area is too small
+                // Always force resize and redraw to ensure buttons are visible
                 const BTN_H = 26, BTN_GAP = 4, BTN_MARGIN = 10;
                 const BTN_EXTRA = BTN_H * 2 + BTN_GAP + BTN_MARGIN;
                 const expectedMinH = (node.computeSize?.() || [0, 260])[1];
@@ -5050,7 +5060,7 @@ function _registerBsaiPP() {
         } catch (e) {
             // Silent - guard should not spam console
         }
-    }, 1000);
+    }, 500);
     } catch (e) {
         console.error("[BSAI Premiere Pro] Extension registration failed:", e);
     }
