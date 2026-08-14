@@ -2604,7 +2604,8 @@ class TimelineEditor {
         if (old) old.remove();
         if (this._playheadTime === null || this._playheadTime === undefined) return;
         const pps = this._pps || 15;
-        const x = this._playheadTime * pps;
+        const SPACER_W = 150;
+        const x = SPACER_W + this._playheadTime * pps;
         const ph = document.createElement("div");
         ph.className = "bsai-pp-timeline-playhead";
         ph.style.left = x + "px";
@@ -2636,7 +2637,7 @@ class TimelineEditor {
         const scrollContainer = this.modal.querySelector("[data-timeline-scroll]");
         if (!scrollContainer) return;
         const pps = this._pps || 15;
-        const playheadX = (this._playheadTime || 0) * pps;
+        const playheadX = 150 + (this._playheadTime || 0) * pps;
         const visW = scrollContainer.clientWidth || 800;
         const left = scrollContainer.scrollLeft;
         const right = left + visW;
