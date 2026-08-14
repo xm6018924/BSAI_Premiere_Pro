@@ -299,7 +299,7 @@ const STYLES = `
     width: 100%; height: 100%; top: 0; left: 0; transform: none;
 }
 .bsai-pp-timeline-preview video {
-    max-width: 100%; max-height: 100%; object-fit: contain; background: #000;
+    width: 100%; height: 100%; object-fit: cover; background: #000;
     transition: transform 0.1s ease;
 }
 .bsai-pp-timeline-preview .preview-close {
@@ -1788,7 +1788,7 @@ class TimelineEditor {
             // Filter media files only
             const mediaFiles = files.filter(f => {
                 const name = f.name.toLowerCase();
-                return /\.(mp4|avi|mov|mkv|webm|flv|wmv|m4v|mpg|mpeg|ts|3gp|mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(name);
+                return /\.(mp4|avi|mov|mkv|webm|flv|wmv|m4v|mpg|mpeg|ts|3gp|mp3|wav|aac|flac|ogg|m4a|wma|opus|png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(name);
             });
             if (mediaFiles.length === 0) {
                 this._toast("所选目录中没有媒体文件", "error");
@@ -3486,33 +3486,47 @@ class TimelineEditor {
 
     async _addClipFromFile(file) {
         try {
-            const metaResp = await api.fetchApi(`/bsai_premiere_pro/metadata?file=${encodeURIComponent(file.file_path)}`);
-            const meta = await metaResp.json();
-            if (meta.error) { this._toast(meta.error, "error"); return false; }
-            if (this.td.filter_audio_only !== false && !meta.has_audio) {
-                if (!this.td.known_files) this.td.known_files = [];
-                this.td.known_files.push(file.file_name);
-                return false;
+            // Use metadata from upload response if available, otherwise fetch it
+            let meta;
+            if (file.duration !== undefined) {
+                // Upload response already has metadata
+                meta = file;
+            } else {
+                const metaResp = await api.fetchApi(`/bsai_premiere_pro/metadata?file=${encodeURIComponent(file.file_path)}`);
+                meta = await metaResp.json();
+                if (meta.error) { this._toast(meta.error, "error"); return false; }
             }
+            const isImage = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(file.file_name || "");
+            const isAudioOnly = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(file.file_name || "");
+            const duration = meta.duration || (isImage ? 5 : 0);
+            const hasAudio = meta.has_audio || false;
             const vId = `clip_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
             const aId = `clip_${Date.now() + 1}_${Math.random().toString(36).substr(2, 6)}`;
             const base = {
                 file_path: file.file_path, file_name: file.file_name,
                 created_time: file.created_time || Date.now() / 1000,
-                duration: meta.duration || 0,
-                width: meta.width || 1920, height: meta.height || 1080, fps: meta.fps || 30,
-                has_audio: meta.has_audio || false,
-                trim_start: 0, trim_end: meta.duration || 0,
+                duration: duration,
+                width: meta.width || (isAudioOnly ? 0 : 1080), height: meta.height || (isAudioOnly ? 0 : 1920), fps: meta.fps || 30,
+                has_audio: hasAudio,
+                trim_start: 0, trim_end: duration,
                 transition_in: "fade", transition_out: "fade",
                 transition_duration: parseFloat(this._getWidgetValue("transition_duration", 0.5)),
                 audio_replacement: null, audio_fade_in: 0, audio_fade_out: 0,
                 video_enabled: true, audio_enabled: true,
             };
-            this.td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: aId, is_video_part: true });
-            this.td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: vId, is_video_part: false });
+            if (isAudioOnly) {
+                // Pure audio: create audio clip only, no video clip
+                this.td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: null, is_video_part: false });
+            } else if (isImage || !hasAudio) {
+                // Image or video without audio: create video clip only, no audio clip
+                this.td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: null, is_video_part: true });
+            } else {
+                // Video with audio: create both linked clips
+                this.td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: aId, is_video_part: true });
+                this.td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: vId, is_video_part: false });
+            }
             if (!this.td.known_files) this.td.known_files = [];
             this.td.known_files.push(file.file_name);
-            // Remove from deleted_files so it can be auto-imported again
             if (this.td.deleted_files) {
                 this.td.deleted_files = this.td.deleted_files.filter(f => f !== file.file_name);
             }
@@ -3538,15 +3552,17 @@ class TimelineEditor {
             if (files.length === 0) return;
             this._toast(`正在上传 ${files.length} 个文件...`, "info");
             let imported = 0;
+            let lastClipId = null;
+            const prevScrollLeft = this.modal.querySelector("[data-track-content]")?.scrollLeft || 0;
             for (const file of files) {
                 const isVideo = /\.(mp4|avi|mov|mkv|webm|flv|wmv|m4v|mpg|mpeg|ts|3gp)$/i.test(file.name);
                 const isAudio = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(file.name);
-                if (!isVideo && !isAudio) {
+                const isImage = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(file.name);
+                if (!isVideo && !isAudio && !isImage) {
                     this._toast(`跳过不支持的文件: ${file.name}`, "error");
                     continue;
                 }
                 try {
-                    // Upload file to server via multipart form data
                     const formData = new FormData();
                     formData.append("file", file, file.name);
                     const resp = await api.fetchApi("/bsai_premiere_pro/upload", {
@@ -3563,7 +3579,12 @@ class TimelineEditor {
                         this._toast(`上传 ${file.name} 失败: ${fileInfo?.error || "无返回数据"}`, "error");
                         continue;
                     }
+                    // Track the clip ID for selection
+                    const clipCountBefore = this.td.clips.length;
                     await this._addClipFromFile(fileInfo);
+                    if (this.td.clips.length > clipCountBefore) {
+                        lastClipId = this.td.clips[this.td.clips.length - 1].id;
+                    }
                     imported++;
                 } catch (e) {
                     this._toast(`导入 ${file.name} 失败: ${e.message}`, "error");
@@ -3573,6 +3594,17 @@ class TimelineEditor {
                 this._toast(`成功导入 ${imported} 个文件`, "success");
                 this._save();
                 this._renderAll();
+                // Select the last imported clip, don't jump to first video
+                if (lastClipId) {
+                    const newIdx = this.td.clips.findIndex(c => c.id === lastClipId);
+                    if (newIdx >= 0) {
+                        this.selectedIndex = newIdx;
+                        // Restore scroll position instead of jumping to first clip
+                        const trackContent = this.modal.querySelector("[data-track-content]");
+                        if (trackContent) trackContent.scrollLeft = prevScrollLeft;
+                        this._renderEditPanel();
+                    }
+                }
             }
         };
         input.click();
@@ -4195,7 +4227,7 @@ function _registerBsaiPP() {
                             document.body.removeChild(dirInput);
                             if (files.length === 0) return;
                             // Filter media files
-                            const mediaFiles = files.filter(f => /\.(mp4|avi|mov|mkv|webm|flv|wmv|m4v|mpg|mpeg|ts|3gp|mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(f.name));
+                            const mediaFiles = files.filter(f => /\.(mp4|avi|mov|mkv|webm|flv|wmv|m4v|mpg|mpeg|ts|3gp|mp3|wav|aac|flac|ogg|m4a|wma|opus|png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(f.name));
                             if (mediaFiles.length === 0) return;
                             // Save current state to directory_history
                             let td;
@@ -4216,12 +4248,41 @@ function _registerBsaiPP() {
                             td.clips = [];
                             td.known_files = [];
                             td.deleted_files = [];
-                            // Upload all media files to server
+                            // Upload all media files to server and create clips directly
                             for (const file of mediaFiles) {
                                 try {
                                     const formData = new FormData();
                                     formData.append("file", file, file.name);
-                                    await api.fetchApi("/bsai_premiere_pro/upload", { method: "POST", body: formData });
+                                    const resp = await api.fetchApi("/bsai_premiere_pro/upload", { method: "POST", body: formData });
+                                    const result = await resp.json();
+                                    const fi = (result.files || [])[0];
+                                    if (!fi || fi.error) continue;
+                                    const isImg = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(fi.file_name);
+                                    const isAudioOnly = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(fi.file_name);
+                                    const dur = fi.duration || (isImg ? 5 : 0);
+                                    const hasAud = fi.has_audio || false;
+                                    const vId = `clip_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
+                                    const aId = `clip_${Date.now()+1}_${Math.random().toString(36).substr(2,6)}`;
+                                    const base = {
+                                        file_path: fi.file_path, file_name: fi.file_name,
+                                        created_time: Date.now()/1000, duration: dur,
+                                        width: fi.width || (isAudioOnly ? 0 : 1080), height: fi.height || (isAudioOnly ? 0 : 1920),
+                                        fps: fi.fps || 30, has_audio: hasAud,
+                                        trim_start: 0, trim_end: dur,
+                                        transition_in: "fade", transition_out: "fade",
+                                        transition_duration: 0.5, audio_replacement: null,
+                                        audio_fade_in: 0, audio_fade_out: 0,
+                                        video_enabled: true, audio_enabled: true,
+                                    };
+                                    if (isAudioOnly) {
+                                        td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: null, is_video_part: false });
+                                    } else if (isImg || !hasAud) {
+                                        td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: null, is_video_part: true });
+                                    } else {
+                                        td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: aId, is_video_part: true });
+                                        td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: vId, is_video_part: false });
+                                    }
+                                    td.known_files.push(fi.file_name);
                                 } catch (e) { /* skip failed */ }
                             }
                             // Set watch directory to upload directory
@@ -4232,8 +4293,6 @@ function _registerBsaiPP() {
                             const importer = importerMap.get(this.id);
                             if (importer) {
                                 importer.updateNodeTitle(td);
-                                // Poll to scan the upload directory and auto-import
-                                setTimeout(() => { importer.poll(); }, 500);
                             }
                         };
                         dirInput.click();

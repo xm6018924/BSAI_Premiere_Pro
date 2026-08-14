@@ -404,16 +404,44 @@ async def upload_file(request):
         except Exception as e:
             results.append({"file_name": filename, "error": str(e)})
             continue
-        # Get metadata (video/audio info)
-        info = await asyncio.to_thread(get_video_info, save_path)
-        results.append({
-            "file_path": save_path,
-            "file_name": os.path.basename(save_path),
-            "size": os.path.getsize(save_path),
-            "duration": (info or {}).get("duration", 0),
-            "width": (info or {}).get("width", 0),
-            "height": (info or {}).get("height", 0),
-            "fps": (info or {}).get("fps", 30),
-            "has_audio": (info or {}).get("has_audio", False),
-        })
+        # Get metadata based on file type
+        ext = os.path.splitext(filename)[1].lower()
+        image_exts = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tiff", ".tif", ".svg"}
+        audio_exts = {".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".wma", ".opus"}
+        if ext in image_exts:
+            # Image file: get dimensions via PIL, no audio, no duration
+            try:
+                from PIL import Image
+                img = Image.open(save_path)
+                w, h = img.size
+                img.close()
+            except Exception:
+                w, h = 0, 0
+            results.append({
+                "file_path": save_path, "file_name": os.path.basename(save_path),
+                "size": os.path.getsize(save_path), "duration": 0,
+                "width": w, "height": h, "fps": 30, "has_audio": False,
+            })
+        elif ext in audio_exts:
+            # Audio file: get duration via ffprobe, no video dimensions
+            info = await asyncio.to_thread(get_video_info, save_path)
+            results.append({
+                "file_path": save_path, "file_name": os.path.basename(save_path),
+                "size": os.path.getsize(save_path),
+                "duration": (info or {}).get("duration", 0),
+                "width": 0, "height": 0, "fps": 30,
+                "has_audio": True,
+            })
+        else:
+            # Video file: full ffprobe metadata
+            info = await asyncio.to_thread(get_video_info, save_path)
+            results.append({
+                "file_path": save_path, "file_name": os.path.basename(save_path),
+                "size": os.path.getsize(save_path),
+                "duration": (info or {}).get("duration", 0),
+                "width": (info or {}).get("width", 0),
+                "height": (info or {}).get("height", 0),
+                "fps": (info or {}).get("fps", 30),
+                "has_audio": (info or {}).get("has_audio", False),
+            })
     return web.json_response({"files": results})
