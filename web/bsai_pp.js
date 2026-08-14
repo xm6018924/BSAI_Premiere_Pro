@@ -91,8 +91,22 @@ const STYLES = `
 }
 .bsai-pp-timeline-section {
     flex: 1; display: flex; flex-direction: column; overflow: hidden;
-    border-bottom: 1px solid #3a3a3a;
     min-height: 0;
+}
+.bsai-pp-divider {
+    height: 6px; flex-shrink: 0; background: #2a2a2a; cursor: ns-resize;
+    user-select: none; position: relative; border-top: 1px solid #1a1a1a;
+    border-bottom: 1px solid #1a1a1a; transition: background 0.15s;
+}
+.bsai-pp-divider::before {
+    content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 40px; height: 2px; background: #555; border-radius: 1px; transition: background 0.15s;
+}
+.bsai-pp-divider:hover, .bsai-pp-divider.dragging {
+    background: #3a5a8a;
+}
+.bsai-pp-divider:hover::before, .bsai-pp-divider.dragging::before {
+    background: #7ab0ff;
 }
 .bsai-pp-section-label {
     padding: 6px 16px; color: #888; font-size: 11px; text-transform: uppercase;
@@ -1101,6 +1115,10 @@ class TimelineEditor {
             this._dragCleanup();
             this._dragCleanup = null;
         }
+        if (this._dividerCleanup) {
+            this._dividerCleanup();
+            this._dividerCleanup = null;
+        }
         this.batchMode = false;
         this.batchSelected.clear();
         this.scissorMode = false;
@@ -1173,6 +1191,7 @@ class TimelineEditor {
                             <div class="bsai-pp-timeline-container" data-track-container></div>
                         </div>
                     </div>
+                    <div class="bsai-pp-divider" data-divider title="拖拽调整面板比例"></div>
                     <div class="bsai-pp-edit-section">
                         <div class="bsai-pp-section-label">剪辑面板</div>
                         <div class="bsai-pp-edit-content" data-edit></div>
@@ -1278,6 +1297,98 @@ class TimelineEditor {
                 modalEl.style.maxHeight = "none";
             }, { passive: false });
         }
+
+        // ── Draggable divider between timeline and edit panel ──
+        const dividerEl = this.modal.querySelector("[data-divider]");
+        if (dividerEl) {
+            let divDragging = false;
+            let divStartY = 0;
+            let divTimelineStartH = 0;
+            let divEditStartH = 0;
+
+            dividerEl.addEventListener("mousedown", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                divDragging = true;
+                divStartY = e.clientY;
+                dividerEl.classList.add("dragging");
+                document.body.style.cursor = "ns-resize";
+                document.body.style.userSelect = "none";
+
+                const bodyEl = this.modal.querySelector(".bsai-pp-body");
+                const timelineEl = this.modal.querySelector(".bsai-pp-timeline-section");
+                const editEl = this.modal.querySelector(".bsai-pp-edit-section");
+                if (bodyEl && timelineEl && editEl) {
+                    // Switch from flex to explicit height for manual control
+                    divTimelineStartH = timelineEl.offsetHeight;
+                    divEditStartH = editEl.offsetHeight;
+                    timelineEl.style.flex = "none";
+                    timelineEl.style.height = divTimelineStartH + "px";
+                }
+            });
+
+            const onDivMove = (e) => {
+                if (!divDragging) return;
+                e.preventDefault();
+                const bodyEl = this.modal.querySelector(".bsai-pp-body");
+                const timelineEl = this.modal.querySelector(".bsai-pp-timeline-section");
+                const editEl = this.modal.querySelector(".bsai-pp-edit-section");
+                if (!bodyEl || !timelineEl || !editEl) return;
+
+                const bodyH = bodyEl.offsetHeight;
+                const delta = e.clientY - divStartY;
+                let newTimelineH = divTimelineStartH + delta;
+                let newEditH = divEditStartH - delta;
+
+                // Enforce minimums: timeline >= 120px, edit >= 80px
+                const MIN_TIMELINE = 120;
+                const MIN_EDIT = 80;
+                if (newTimelineH < MIN_TIMELINE) {
+                    newTimelineH = MIN_TIMELINE;
+                    newEditH = bodyH - MIN_TIMELINE - 6; // 6px divider
+                }
+                if (newEditH < MIN_EDIT) {
+                    newEditH = MIN_EDIT;
+                    newTimelineH = bodyH - MIN_EDIT - 6;
+                }
+
+                timelineEl.style.height = newTimelineH + "px";
+                editEl.style.height = newEditH + "px";
+                editEl.style.flex = "none";
+            };
+
+            const onDivUp = () => {
+                if (!divDragging) return;
+                divDragging = false;
+                dividerEl.classList.remove("dragging");
+                document.body.style.cursor = "";
+                document.body.style.userSelect = "";
+            };
+
+            document.addEventListener("mousemove", onDivMove);
+            document.addEventListener("mouseup", onDivUp);
+
+            // Double-click to reset to default proportions
+            dividerEl.addEventListener("dblclick", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const timelineEl = this.modal.querySelector(".bsai-pp-timeline-section");
+                const editEl = this.modal.querySelector(".bsai-pp-edit-section");
+                if (timelineEl && editEl) {
+                    timelineEl.style.flex = "1";
+                    timelineEl.style.height = "";
+                    editEl.style.flex = "";
+                    editEl.style.height = "180px";
+                }
+            });
+
+            // Store cleanup
+            this._dividerCleanup = () => {
+                document.removeEventListener("mousemove", onDivMove);
+                document.removeEventListener("mouseup", onDivUp);
+            };
+        }
+
         this.modal.querySelector('[data-act="close-preview"]').onclick = (e) => {
             e.stopPropagation();
             const overlay = this.modal.querySelector("[data-timeline-preview]");
