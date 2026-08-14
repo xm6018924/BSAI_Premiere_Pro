@@ -1468,14 +1468,17 @@ class TimelineEditor {
         // Restore align mode from saved state
         const alignSelect = this.modal.querySelector('[data-act="align-mode"]');
         if (alignSelect && this.td.align_mode) alignSelect.value = this.td.align_mode;
-        // Mouse wheel zoom on timeline
+        // Mouse wheel zoom on timeline - plain wheel = zoom, Shift+wheel = scroll
         const timelineScroll = this.modal.querySelector("[data-timeline-scroll]");
         if (timelineScroll) {
             timelineScroll.addEventListener("wheel", (e) => {
-                if (e.ctrlKey || e.metaKey) {
-                    e.preventDefault();
-                    this._adjustZoom(e.deltaY < 0 ? 1.15 : 0.87);
+                if (e.shiftKey) {
+                    // Shift+wheel: horizontal scroll, let default behavior
+                    return;
                 }
+                // Plain wheel (or Ctrl+wheel): zoom timeline
+                e.preventDefault();
+                this._adjustZoom(e.deltaY < 0 ? 1.15 : 0.87);
             }, { passive: false });
         }
         this.modal.querySelector('[data-act="auto-import"]').onchange = (e) => {
