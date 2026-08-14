@@ -120,10 +120,10 @@ const STYLES = `
     display: flex; align-items: center; gap: 8px;
 }
 .bsai-pp-track-row {
-    display: flex; border-bottom: 1px solid #111; min-height: 50px; flex-shrink: 0;
+    display: flex; border-bottom: 1px solid #111; min-height: 40px; flex-shrink: 0;
 }
-.bsai-pp-track-row.video-track { min-height: 120px; }
-.bsai-pp-track-row.audio-track { min-height: 50px; }
+.bsai-pp-track-row.video-track { min-height: 90px; }
+.bsai-pp-track-row.audio-track { min-height: 40px; }
 .bsai-pp-track-header {
     min-width: 150px; flex-shrink: 0; background: #2a2a2a;
     border-right: 1px solid #3a3a3a; display: flex; flex-direction: column;
@@ -144,9 +144,9 @@ const STYLES = `
 .bsai-pp-track-btn.danger:hover { background: #d35454; color: #fff; }
 .bsai-pp-track-content {
     flex: 1; background: #1a1a1a; display: flex; align-items: stretch;
-    gap: 0; padding: 4px 4px; overflow-x: visible; position: relative; min-height: 42px;
+    gap: 0; padding: 3px 4px; overflow-x: visible; position: relative; min-height: 34px;
 }
-.bsai-pp-track-row.video-track .bsai-pp-track-content { min-height: 112px; }
+.bsai-pp-track-row.video-track .bsai-pp-track-content { min-height: 82px; }
 .bsai-pp-track-empty { color: #444; font-size: 11px; padding: 0 12px; }
 .bsai-pp-clip-block {
     border: 1px solid #3a3a3a; border-radius: 4px; height: 52px; cursor: pointer;
@@ -177,7 +177,7 @@ const STYLES = `
     flex: 1; background: #111; display: flex; align-items: center;
     justify-content: center; overflow: hidden; position: relative; min-height: 30px;
 }
-.bsai-pp-clip-block.video-clip .bsai-pp-clip-thumb { min-height: 70px; flex: 1 1 auto; }
+.bsai-pp-clip-block.video-clip .bsai-pp-clip-thumb { min-height: 50px; flex: 1 1 auto; }
 .bsai-pp-clip-thumb img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 .bsai-pp-clip-thumb .placeholder { color: #555; font-size: 14px; }
 .bsai-pp-clip-waveform { width: 100%; height: 100%; object-fit: cover; background: #1a2a1a; }
@@ -246,7 +246,7 @@ const STYLES = `
     width: 100%;
 }
 .bsai-pp-edit-section {
-    height: 200px; flex-shrink: 0; overflow-y: auto;
+    height: 180px; flex-shrink: 0; overflow-y: auto;
     background: #222; display: flex; flex-direction: column;
 }
 .bsai-pp-edit-content { padding: 12px 16px; }
@@ -311,6 +311,12 @@ const STYLES = `
     position: absolute; bottom: 0; left: 0; width: 0%; height: 3px;
     background: #4a90d9; z-index: 201; transition: width 0.1s linear;
 }
+.bsai-pp-timeline-preview .preview-zoom-info {
+    position: absolute; top: 6px; left: 50%; transform: translateX(-50%); z-index: 201;
+    background: rgba(0,0,0,0.75); color: #fff; padding: 3px 10px;
+    border-radius: 4px; font-size: 11px; font-family: monospace; display: none;
+}
+.bsai-pp-timeline-preview .preview-zoom-info.visible { display: block; }
 /* ── Zoom controls ── */
 .bsai-pp-zoom-display { color: #aaa; font-size: 11px; min-width: 38px; text-align: center; user-select: none; }
 /* ── Alignment controls ── */
@@ -1173,6 +1179,7 @@ class TimelineEditor {
                             <button class="preview-enlarge" data-act="enlarge-preview" title="放大/缩小">⛶</button>
                             <button class="preview-close" data-act="close-preview">✕</button>
                             <div class="preview-info" data-preview-info></div>
+                            <div class="preview-zoom-info" data-preview-zoom-info></div>
                             <div class="preview-progress" data-preview-progress></div>
                         </div>
                     </div>
@@ -1287,8 +1294,10 @@ class TimelineEditor {
                 video.pause();
                 video.ontimeupdate = null;
                 video.onended = null;
+                video.style.transform = "";
             }
             this._previewVideoActive = false;
+            this._previewZoom = 1;
         };
         this.modal.querySelector('[data-act="enlarge-preview"]').onclick = (e) => {
             e.stopPropagation();
@@ -1296,6 +1305,27 @@ class TimelineEditor {
             if (overlay) overlay.classList.toggle("fullscreen");
             e.target.textContent = overlay.classList.contains("fullscreen") ? "🗗" : "⛶";
         };
+        // Mouse wheel to zoom preview video
+        const previewOverlay = this.modal.querySelector("[data-timeline-preview]");
+        const previewVideo = this.modal.querySelector("[data-preview-video]");
+        if (previewOverlay && previewVideo) {
+            this._previewZoom = 1;
+            previewOverlay.addEventListener("wheel", (e) => {
+                if (!this._previewVideoActive) return;
+                e.preventDefault();
+                const delta = e.deltaY < 0 ? 1.1 : 0.9;
+                this._previewZoom = Math.max(0.5, Math.min(5, this._previewZoom * delta));
+                previewVideo.style.transform = `scale(${this._previewZoom})`;
+                previewVideo.style.transformOrigin = "center center";
+                const zoomInfo = this.modal.querySelector("[data-preview-zoom-info]");
+                if (zoomInfo) {
+                    zoomInfo.textContent = `缩放: ${Math.round(this._previewZoom * 100)}%`;
+                    zoomInfo.classList.add("visible");
+                    clearTimeout(this._zoomInfoTimer);
+                    this._zoomInfoTimer = setTimeout(() => zoomInfo.classList.remove("visible"), 1500);
+                }
+            }, { passive: false });
+        }
         this.modal.querySelector('[data-act="zoom-in"]').onclick = () => this._adjustZoom(1.25);
         this.modal.querySelector('[data-act="zoom-out"]').onclick = () => this._adjustZoom(0.8);
         this.modal.querySelector('[data-act="align-mode"]').onchange = (e) => {
@@ -1360,6 +1390,15 @@ class TimelineEditor {
                 }
             }
             if (e.key === "Escape") this.close();
+            // Delete key: delete selected clip
+            if ((e.key === "Delete" || e.key === "Backspace") && !this._previewVideoActive) {
+                const tag = e.target?.tagName?.toLowerCase();
+                if (tag === "input" || tag === "textarea" || tag === "select") return;
+                if (this.selectedIndex >= 0) {
+                    e.preventDefault();
+                    this._deleteClip(this.selectedIndex);
+                }
+            }
         };
         document.addEventListener("keydown", this._docKeydown);
         this.modal.querySelector('[data-act="browse-dir"]').onclick = () => this._browseDirectory();
@@ -3535,6 +3574,9 @@ class TimelineEditor {
             this._stopPlayback();
             // Track that preview video is active so spacebar controls it
             this._previewVideoActive = true;
+            // Reset zoom
+            this._previewZoom = 1;
+            video.style.transform = "";
             video.play().catch(() => {});
             // Add timeupdate for progress bar
             video.ontimeupdate = () => {
