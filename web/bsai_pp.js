@@ -2465,7 +2465,7 @@ class TimelineEditor {
         let startIdx = 0;
         this._playStartOffset = null;
         // Priority 1: If playhead is set, find the clip at playhead position
-        if (this._playheadTime !== null && this._playheadTime !== undefined) {
+        if (this._playheadTime !== null && this._playheadTime !== undefined && isFinite(this._playheadTime)) {
             const phTime = this._playheadTime;
             for (let i = 0; i < videoClips.length; i++) {
                 const clip = videoClips[i];
@@ -2473,8 +2473,12 @@ class TimelineEditor {
                 const clipDur = (clip.trim_end || 0) - (clip.trim_start || 0);
                 const clipEnd = clipStart + clipDur;
                 if (phTime >= clipStart && phTime < clipEnd) {
-                    startIdx = i;
-                    this._playStartOffset = (clip.trim_start || 0) + (phTime - clipStart);
+                    const offset = (clip.trim_start || 0) + (phTime - clipStart);
+                    // Safety: if offset is too close to trimEnd, start from beginning
+                    if (offset < (clip.trim_end || 0) - 0.5) {
+                        startIdx = i;
+                        this._playStartOffset = offset;
+                    }
                     break;
                 }
             }
@@ -2499,6 +2503,7 @@ class TimelineEditor {
 
     _playNextClip() {
         if (!this._isPlaying || this._playClipIndex >= this._playClips.length) {
+            this._playheadTime = null;
             this._stopPlayback();
             return;
         }
