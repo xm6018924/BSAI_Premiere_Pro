@@ -1774,107 +1774,27 @@ class TimelineEditor {
 
     async _browseDirectory() {
         const oldDir = this._getWidgetValue("watch_directory", "");
-        // Server-side directory browser dialog
-        const overlay = document.createElement("div");
-        overlay.className = "bsai-pp-dialog-overlay";
-        const dialog = document.createElement("div");
-        dialog.className = "bsai-pp-import-dialog";
-        dialog.style.minWidth = "500px";
-        dialog.style.maxWidth = "90vw";
-        dialog.style.maxHeight = "80vh";
-        dialog.style.display = "flex";
-        dialog.style.flexDirection = "column";
-        dialog.innerHTML = `
-            <h3>📁 选择监视目录</h3>
-            <div style="display:flex;gap:6px;margin-bottom:8px;align-items:center;">
-                <input type="text" class="bsai-pp-dir-input" placeholder="输入或粘贴目录路径..." style="flex:1;background:#1a1a1a;border:1px solid #444;color:#e0e0e0;padding:6px 10px;border-radius:4px;font-size:12px;">
-                <button class="bsai-pp-btn bsai-pp-btn-primary" data-act="go">前往</button>
-            </div>
-            <div class="bsai-pp-breadcrumb" data-breadcrumb></div>
-            <div class="bsai-pp-dir-list" data-dir-list style="flex:1;overflow-y:auto;max-height:400px;background:#1a1a1a;border:1px solid #333;border-radius:4px;padding:4px;"></div>
-            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
-                <button class="bsai-pp-btn" data-cancel>取消</button>
-                <button class="bsai-pp-btn bsai-pp-btn-primary" data-confirm>确定选择此目录</button>
-            </div>`;
-        overlay.appendChild(dialog);
-        document.body.appendChild(overlay);
-        _addMaximizeBtn(dialog);
+        // Use Windows Explorer folder picker via webkitdirectory
+        const input = document.createElement("input");
+        input.type = "file";
+        input.setAttribute("webkitdirectory", "");
+        input.style.display = "none";
+        document.body.appendChild(input);
 
-        let currentPath = oldDir || "";
-        const pathInput = dialog.querySelector(".bsai-pp-dir-input");
-        const breadcrumbEl = dialog.querySelector("[data-breadcrumb]");
-        const listEl = dialog.querySelector("[data-dir-list]");
-
-        const loadDir = async (path) => {
-            currentPath = path || "";
-            pathInput.value = currentPath;
-            listEl.innerHTML = '<div style="color:#666;padding:10px;">加载中...</div>';
-            try {
-                const resp = await api.fetchApi(`/bsai_premiere_pro/browse?path=${encodeURIComponent(currentPath)}`);
-                const data = await resp.json();
-                if (data.error) {
-                    listEl.innerHTML = `<div style="color:#f66;padding:10px;">${escapeHtml(data.error)}</div>`;
-                    return;
-                }
-                // Render breadcrumb
-                let bcHtml = "";
-                if (data.is_root) {
-                    bcHtml = `<span class="bsai-pp-breadcrumb-current">此电脑</span>`;
-                } else {
-                    const parts = currentPath.split(/[\\/]/).filter(p => p);
-                    let builtPath = "";
-                    bcHtml = `<span class="bsai-pp-breadcrumb-item" data-path="">此电脑</span>`;
-                    for (let i = 0; i < parts.length; i++) {
-                        builtPath = i === 0 ? parts[i] + "\\" : builtPath + "\\" + parts[i];
-                        const isLast = i === parts.length - 1;
-                        bcHtml += `<span class="bsai-pp-breadcrumb-sep">›</span>`;
-                        bcHtml += isLast
-                            ? `<span class="bsai-pp-breadcrumb-current">${escapeHtml(parts[i])}</span>`
-                            : `<span class="bsai-pp-breadcrumb-item" data-path="${escapeHtml(builtPath)}">${escapeHtml(parts[i])}</span>`;
-                    }
-                }
-                breadcrumbEl.innerHTML = bcHtml;
-                breadcrumbEl.querySelectorAll(".bsai-pp-breadcrumb-item").forEach(item => {
-                    item.onclick = () => loadDir(item.getAttribute("data-path") || "");
-                });
-
-                // Render directory list
-                let listHtml = "";
-                if (data.parent !== undefined && data.parent !== "" && !data.is_root) {
-                    listHtml += `<div class="bsai-pp-dir-item" data-path="${escapeHtml(data.parent)}" style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;border-radius:3px;color:#4a90d9;font-size:13px;">📁 <span>..</span></div>`;
-                }
-                for (const dir of (data.dirs || [])) {
-                    listHtml += `<div class="bsai-pp-dir-item" data-path="${escapeHtml(data.is_root ? dir : (currentPath ? currentPath.replace(/[\\/]+$/, "") + "\\" + dir : dir))}" style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;border-radius:3px;color:#ccc;font-size:13px;">📁 <span>${escapeHtml(dir)}</span></div>`;
-                }
-                listEl.innerHTML = listHtml || '<div style="color:#555;padding:10px;">没有子目录</div>';
-                listEl.querySelectorAll(".bsai-pp-dir-item").forEach(item => {
-                    item.onmouseenter = () => item.style.background = "#2a3a4a";
-                    item.onmouseleave = () => item.style.background = "";
-                    item.ondblclick = () => loadDir(item.getAttribute("data-path") || "");
-                    item.onclick = () => {
-                        listEl.querySelectorAll(".bsai-pp-dir-item").forEach(i => i.style.background = "");
-                        item.style.background = "#3a5a7a";
-                        currentPath = item.getAttribute("data-path") || "";
-                        pathInput.value = currentPath;
-                    };
-                });
-            } catch (e) {
-                listEl.innerHTML = `<div style="color:#f66;padding:10px;">加载失败: ${escapeHtml(e.message)}</div>`;
-            }
-        };
-
-        pathInput.onkeydown = (e) => {
-            if (e.key === "Enter") loadDir(pathInput.value.trim());
-        };
-        dialog.querySelector('[data-act="go"]').onclick = () => loadDir(pathInput.value.trim());
-        dialog.querySelector("[data-cancel]").onclick = () => overlay.remove();
-        dialog.querySelector("[data-confirm]").onclick = () => {
-            const selected = pathInput.value.trim() || currentPath;
-            overlay.remove();
-            if (!selected || selected === oldDir) {
-                if (selected === oldDir) this._toast("目录未变化", "info");
+        input.onchange = async () => {
+            const files = Array.from(input.files || []);
+            document.body.removeChild(input);
+            if (files.length === 0) return;
+            // Filter media files only
+            const mediaFiles = files.filter(f => {
+                const name = f.name.toLowerCase();
+                return /\.(mp4|avi|mov|mkv|webm|flv|wmv|m4v|mpg|mpeg|ts|3gp|mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(name);
+            });
+            if (mediaFiles.length === 0) {
+                this._toast("所选目录中没有媒体文件", "error");
                 return;
             }
+            this._toast(`正在从目录导入 ${mediaFiles.length} 个媒体文件...`, "info");
             // Save current timeline state to directory_history
             if (!this.td.directory_history) this.td.directory_history = {};
             if (oldDir) {
@@ -1886,34 +1806,46 @@ class TimelineEditor {
                     audio_tracks: JSON.parse(JSON.stringify(this.td.audio_tracks || [])),
                 };
             }
-            // Restore or initialize new directory state
-            const hist = this.td.directory_history[selected];
-            if (hist) {
-                this.td.clips = JSON.parse(JSON.stringify(hist.clips || []));
-                this.td.known_files = JSON.parse(JSON.stringify(hist.known_files || []));
-                this.td.deleted_files = JSON.parse(JSON.stringify(hist.deleted_files || []));
-                this.td.video_tracks = JSON.parse(JSON.stringify(hist.video_tracks || [{ name: "V1", locked: false, visible: true }]));
-                this.td.audio_tracks = JSON.parse(JSON.stringify(hist.audio_tracks || [{ name: "A1", locked: false, muted: false, solo: false }]));
-                this._toast(`已切换到目录: ${selected} (恢复 ${this.td.clips.length} 个片段)`, "success");
-            } else {
-                this.td.clips = [];
-                this.td.known_files = [];
-                this.td.deleted_files = [];
-                this._toast(`已切换到新目录: ${selected}，正在扫描...`, "info");
-            }
+            // Clear current timeline for new directory
+            this.td.clips = [];
+            this.td.known_files = [];
+            this.td.deleted_files = [];
             this.selectedIndex = -1;
-            const dirInput = this.modal.querySelector('[data-act="dir"]');
-            if (dirInput) dirInput.value = selected;
-            const w = this._getWidget("watch_directory");
-            if (w) w.value = selected;
+            // Upload all media files to server
+            let imported = 0;
+            for (const file of mediaFiles) {
+                try {
+                    const formData = new FormData();
+                    formData.append("file", file, file.name);
+                    const resp = await api.fetchApi("/bsai_premiere_pro/upload", {
+                        method: "POST",
+                        body: formData,
+                    });
+                    const result = await resp.json();
+                    if (result.error) continue;
+                    const fileInfo = (result.files || [])[0];
+                    if (!fileInfo || fileInfo.error) continue;
+                    await this._addClipFromFile(fileInfo);
+                    imported++;
+                } catch (e) {
+                    // Skip failed files
+                }
+            }
+            if (imported > 0) {
+                // Set watch directory to the upload directory
+                const uploadDir = "output/bsai_imports";
+                const dirInput = this.modal.querySelector('[data-act="dir"]');
+                if (dirInput) dirInput.value = uploadDir;
+                const w = this._getWidget("watch_directory");
+                if (w) w.value = uploadDir;
+                this._toast(`成功从目录导入 ${imported} 个媒体文件`, "success");
+            } else {
+                this._toast("没有成功导入任何文件", "error");
+            }
             this._save();
             this._renderAll();
-            if (!hist) {
-                setTimeout(() => this._scanNow(), 100);
-            }
         };
-        // Load initial directory
-        loadDir(oldDir);
+        input.click();
     }
 
     _showDirHistory(e) {
@@ -3808,48 +3740,45 @@ class TimelineEditor {
             this._toast("该轨道已锁定，无法删除片段", "error");
             return;
         }
-        // If linked, also delete the linked partner (both removed)
-        const idsToDelete = new Set([clip.id]);
-        if (clip.linked_id) {
-            idsToDelete.add(clip.linked_id);
-            const linked = this.td.clips.find(c => c.id === clip.linked_id);
-            if (linked) linked.linked_id = null;
-        }
         // Track deleted file to prevent auto-reimport
         if (!this.td.deleted_files) this.td.deleted_files = [];
         if (!this.td.deleted_files.includes(clip.file_name)) {
             this.td.deleted_files.push(clip.file_name);
         }
-        // Replace deleted clips with gap placeholders (preserve timeline positions)
-        const gapClips = [];
-        for (const c of this.td.clips) {
-            if (idsToDelete.has(c.id)) {
-                // Create a gap clip to preserve the position
-                gapClips.push({
-                    id: c.id + "_gap",
-                    track_type: c.track_type,
-                    track_index: c.track_index,
-                    file_path: null,
-                    file_name: "(gap)",
-                    duration: c.duration || 0,
-                    trim_start: 0,
-                    trim_end: c.duration || 0,
-                    is_gap: true,
-                    linked_id: null,
-                    transition_in: "cut",
-                    transition_out: "cut",
-                    transition_duration: 0,
-                });
-            } else {
-                gapClips.push(c);
+        // If linked, also delete the linked partner (both removed, no gap - clips shift forward)
+        if (clip.linked_id) {
+            const idsToDelete = new Set([clip.id, clip.linked_id]);
+            // Simply remove both clips - remaining clips naturally shift forward
+            this.td.clips = this.td.clips.filter(c => !idsToDelete.has(c.id));
+        } else {
+            // Unlinked clip: replace with gap placeholder to preserve position alignment
+            // (the partner on the other track stays, so gap maintains alignment)
+            const gapClips = [];
+            for (const c of this.td.clips) {
+                if (c.id === clip.id) {
+                    gapClips.push({
+                        id: c.id + "_gap",
+                        track_type: c.track_type,
+                        track_index: c.track_index,
+                        file_path: null,
+                        file_name: "(gap)",
+                        duration: c.duration || 0,
+                        trim_start: 0,
+                        trim_end: c.duration || 0,
+                        is_gap: true,
+                        linked_id: null,
+                        transition_in: "cut",
+                        transition_out: "cut",
+                        transition_duration: 0,
+                    });
+                } else {
+                    gapClips.push(c);
+                }
             }
+            this.td.clips = gapClips;
         }
-        this.td.clips = gapClips;
-        if (this.selectedIndex >= this.td.clips.length) this.selectedIndex = this.td.clips.length - 1;
-        // If selected clip is now a gap, deselect
-        if (this.selectedIndex >= 0 && this.td.clips[this.selectedIndex]?.is_gap) {
-            this.selectedIndex = -1;
-        }
+        this.selectedIndex = -1;
+        this.boxSelected.clear();
         this._save();
         this._renderAll();
     }
@@ -4028,41 +3957,15 @@ class TimelineEditor {
             if (infoEl) infoEl.textContent = `🎞️ 渲染结果: ${filename}`;
             this._previewZoom = 1;
             video.style.transform = "";
-            // Reset overlay to fill modal
+            // Fill entire preview area - no black bars
             overlay.style.width = "100%";
             overlay.style.height = "100%";
             overlay.style.left = "0";
             overlay.style.top = "0";
-            // Adapt overlay + video to match video aspect ratio (no black bars)
-            video.onloadedmetadata = () => {
-                const vw = video.videoWidth || 1920;
-                const vh = video.videoHeight || 1080;
-                const aspect = vw / vh;
-                const modal = this.modal.querySelector(".bsai-pp-modal");
-                const maxW = (modal?.clientWidth || overlay.clientWidth) - 4;
-                const maxH = (modal?.clientHeight || overlay.clientHeight) - 4;
-                const containerAspect = maxW / maxH;
-                // Size overlay to match video aspect ratio, centered in modal
-                let overlayW, overlayH;
-                if (aspect > containerAspect) {
-                    // Wider video: fit width
-                    overlayW = maxW;
-                    overlayH = maxW / aspect;
-                } else {
-                    // Taller video: fit height
-                    overlayH = maxH;
-                    overlayW = maxH * aspect;
-                }
-                overlay.style.width = overlayW + "px";
-                overlay.style.height = overlayH + "px";
-                overlay.style.left = "50%";
-                overlay.style.top = "50%";
-                overlay.style.transform = "translate(-50%, -50%)";
-                // Video fills overlay exactly (aspect ratios match, so no distortion)
-                video.style.width = "100%";
-                video.style.height = "100%";
-                video.style.objectFit = "fill";
-            };
+            overlay.style.transform = "none";
+            video.style.width = "100%";
+            video.style.height = "100%";
+            video.style.objectFit = "cover";
             video.play().catch(() => {});
             video.ontimeupdate = () => {
                 const prog = this.modal.querySelector("[data-preview-progress]");
