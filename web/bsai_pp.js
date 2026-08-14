@@ -299,7 +299,7 @@ const STYLES = `
     width: 100%; height: 100%; top: 0; left: 0; transform: none;
 }
 .bsai-pp-timeline-preview video {
-    max-width: 100%; max-height: 100%; object-fit: contain; background: #000;
+    width: 100%; height: 100%; object-fit: cover; object-position: center; background: #000;
     transition: transform 0.1s ease;
 }
 .bsai-pp-timeline-preview .preview-close {
@@ -4001,7 +4001,8 @@ class TimelineEditor {
             overlay.style.transform = "none";
             video.style.width = "100%";
             video.style.height = "100%";
-            video.style.objectFit = "contain";
+            video.style.objectFit = "cover";
+            video.style.objectPosition = "center";
             video.play().catch(() => {});
             video.ontimeupdate = () => {
                 const prog = this.modal.querySelector("[data-preview-progress]");
