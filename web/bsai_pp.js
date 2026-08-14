@@ -2584,11 +2584,21 @@ class TimelineEditor {
         } else {
             block.onclick = (e) => {
                 if (e.shiftKey) {
-                    // Shift+click for multi-select
+                    // Shift+click for multi-select (auto-include linked partner)
                     if (this.boxSelected.has(clipIndex)) {
                         this.boxSelected.delete(clipIndex);
+                        // Also remove linked partner
+                        if (clip.linked_id) {
+                            const linkedIdx = this.td.clips.findIndex(c => c.id === clip.linked_id);
+                            if (linkedIdx >= 0) this.boxSelected.delete(linkedIdx);
+                        }
                     } else {
                         this.boxSelected.add(clipIndex);
+                        // Also select linked partner
+                        if (clip.linked_id) {
+                            const linkedIdx = this.td.clips.findIndex(c => c.id === clip.linked_id);
+                            if (linkedIdx >= 0) this.boxSelected.add(linkedIdx);
+                        }
                     }
                     this._renderTimeline();
                     this._renderBoxBar();
@@ -2791,6 +2801,7 @@ class TimelineEditor {
                 // Select clips that intersect with the selection box
                 const boxRect = selBox.getBoundingClientRect();
                 const clips = this._getClipsForTrack(trackType, trackIndex);
+                const newSelected = new Set();
                 clips.forEach(clip => {
                     const clipIdx = this.td.clips.indexOf(clip);
                     const clipBlock = contentEl.querySelector(`[data-clip-idx="${clipIdx}"]`);
@@ -2798,10 +2809,20 @@ class TimelineEditor {
                         const clipRect = clipBlock.getBoundingClientRect();
                         if (!(boxRect.right < clipRect.left || boxRect.left > clipRect.right ||
                               boxRect.bottom < clipRect.top || boxRect.top > clipRect.bottom)) {
-                            this.boxSelected.add(clipIdx);
+                            newSelected.add(clipIdx);
                         }
                     }
                 });
+                // Auto-select linked audio/video partners
+                for (const idx of newSelected) {
+                    const clip = this.td.clips[idx];
+                    if (clip?.linked_id) {
+                        const linkedIdx = this.td.clips.findIndex(c => c.id === clip.linked_id);
+                        if (linkedIdx >= 0) newSelected.add(linkedIdx);
+                    }
+                }
+                // Merge into boxSelected (additive selection)
+                for (const idx of newSelected) this.boxSelected.add(idx);
                 selBox.remove();
                 if (this.boxSelected.size > 0) {
                     this._renderTimeline();
