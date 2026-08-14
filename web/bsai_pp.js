@@ -4184,47 +4184,59 @@ function _registerBsaiPP() {
                     if (btn.action === "browse") {
                         const dirWidget = this.widgets?.find(w => w.name === "watch_directory");
                         const oldDir = dirWidget?.value || "";
-                        browseDirectoryDialog(oldDir).then(selected => {
-                            if (selected && selected !== oldDir) {
-                                // Save/restore directory history
-                                let td;
-                                try { td = JSON.parse(this.properties?.bsai_td || '{}'); } catch { td = {}; }
-                                if (!td.clips) td.clips = [];
-                                if (!td.known_files) td.known_files = [];
-                                if (!td.deleted_files) td.deleted_files = [];
-                                if (!td.directory_history) td.directory_history = {};
-                                if (!td.video_tracks) td.video_tracks = [{ name: "V1", locked: false, visible: true }];
-                                if (!td.audio_tracks) td.audio_tracks = [{ name: "A1", locked: false, muted: false, solo: false }];
-                                // Save current state
-                                if (oldDir) {
-                                    td.directory_history[oldDir] = {
-                                        clips: td.clips, known_files: td.known_files, deleted_files: td.deleted_files,
-                                        video_tracks: td.video_tracks, audio_tracks: td.audio_tracks,
-                                    };
-                                }
-                                // Restore or initialize
-                                const hist = td.directory_history[selected];
-                                if (hist) {
-                                    td.clips = hist.clips || [];
-                                    td.known_files = hist.known_files || [];
-                                    td.deleted_files = hist.deleted_files || [];
-                                    td.video_tracks = hist.video_tracks || [{ name: "V1", locked: false, visible: true }];
-                                    td.audio_tracks = hist.audio_tracks || [{ name: "A1", locked: false, muted: false, solo: false }];
-                                } else {
-                                    td.clips = []; td.known_files = []; td.deleted_files = [];
-                                }
-                                if (dirWidget) dirWidget.value = selected;
-                                this.properties.bsai_td = JSON.stringify(td);
-                                _syncToServer(this);
-                                const importer = importerMap.get(this.id);
-                                if (importer) {
-                                    importer.updateNodeTitle(td);
-                                    if (!hist) setTimeout(() => {
-                                        importer.poll();
-                                    }, 500);
-                                }
+                        // Use Windows Explorer folder picker via webkitdirectory
+                        const dirInput = document.createElement("input");
+                        dirInput.type = "file";
+                        dirInput.setAttribute("webkitdirectory", "");
+                        dirInput.style.display = "none";
+                        document.body.appendChild(dirInput);
+                        dirInput.onchange = async () => {
+                            const files = Array.from(dirInput.files || []);
+                            document.body.removeChild(dirInput);
+                            if (files.length === 0) return;
+                            // Filter media files
+                            const mediaFiles = files.filter(f => /\.(mp4|avi|mov|mkv|webm|flv|wmv|m4v|mpg|mpeg|ts|3gp|mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(f.name));
+                            if (mediaFiles.length === 0) return;
+                            // Save current state to directory_history
+                            let td;
+                            try { td = JSON.parse(this.properties?.bsai_td || '{}'); } catch { td = {}; }
+                            if (!td.clips) td.clips = [];
+                            if (!td.known_files) td.known_files = [];
+                            if (!td.deleted_files) td.deleted_files = [];
+                            if (!td.directory_history) td.directory_history = {};
+                            if (!td.video_tracks) td.video_tracks = [{ name: "V1", locked: false, visible: true }];
+                            if (!td.audio_tracks) td.audio_tracks = [{ name: "A1", locked: false, muted: false, solo: false }];
+                            if (oldDir) {
+                                td.directory_history[oldDir] = {
+                                    clips: td.clips, known_files: td.known_files, deleted_files: td.deleted_files,
+                                    video_tracks: td.video_tracks, audio_tracks: td.audio_tracks,
+                                };
                             }
-                        });
+                            // Clear current timeline for new directory
+                            td.clips = [];
+                            td.known_files = [];
+                            td.deleted_files = [];
+                            // Upload all media files to server
+                            for (const file of mediaFiles) {
+                                try {
+                                    const formData = new FormData();
+                                    formData.append("file", file, file.name);
+                                    await api.fetchApi("/bsai_premiere_pro/upload", { method: "POST", body: formData });
+                                } catch (e) { /* skip failed */ }
+                            }
+                            // Set watch directory to upload directory
+                            const uploadDir = "output/bsai_imports";
+                            if (dirWidget) dirWidget.value = uploadDir;
+                            this.properties.bsai_td = JSON.stringify(td);
+                            _syncToServer(this);
+                            const importer = importerMap.get(this.id);
+                            if (importer) {
+                                importer.updateNodeTitle(td);
+                                // Poll to scan the upload directory and auto-import
+                                setTimeout(() => { importer.poll(); }, 500);
+                            }
+                        };
+                        dirInput.click();
                     } else if (btn.action === "editor") {
                         const editor = new TimelineEditor(this);
                         editor.open();
