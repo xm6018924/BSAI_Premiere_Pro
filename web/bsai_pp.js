@@ -1910,8 +1910,8 @@ class TimelineEditor {
             this._toast("时间轴上没有可播放的视频片段", "error");
             return;
         }
-        // If resuming from pause, just resume the current video
-        if (this._playClipIndex > 0 && this._playClipIndex < videoClips.length && this._playClips === videoClips) {
+        // If resuming from pause (inline video element still exists), just resume
+        if (!this._isPlaying && this._playClips.length > 0) {
             const inlineVideo = this.modal.querySelector(".bsai-pp-inline-video");
             if (inlineVideo) {
                 this._isPlaying = true;
@@ -1923,6 +1923,7 @@ class TimelineEditor {
                 return;
             }
         }
+        // Fresh start: play from first video clip
         this._playClips = videoClips;
         this._playClipIndex = 0;
         this._isPlaying = true;

@@ -579,35 +579,75 @@ def _process_track_clips(clips, track_type, track_index, temp_dir, target_w, tar
     if len(processed_files) == 1:
         return processed_files[0]
 
-    # Concatenate clips within the track
-    concat_file = os.path.join(track_temp_dir, "concat_list.txt")
-    with open(concat_file, "w", encoding="utf-8") as f:
-        for pf in processed_files:
-            escaped = pf.replace("\\", "/")
-            f.write(f"file '{escaped}'\n")
-
+    # Use filter_complex concat for gapless merging
+    # The concat demuxer (-f concat) relies on keyframe alignment and can introduce
+    # tiny gaps/seams at clip boundaries causing video flash and audio pop.
+    # filter_complex concat decodes all clips and joins at frame level = seamless.
     merged_file = os.path.join(temp_dir, f"merged_{track_type}_{track_index}.mp4")
+    n = len(processed_files)
 
-    # Try stream copy first (fast), fall back to re-encode if it fails
-    concat_cmd = [
-        ffmpeg, "-y", "-loglevel", "error",
-        "-f", "concat", "-safe", "0", "-i", concat_file,
-        "-c", "copy",
+    concat_cmd = [ffmpeg, "-y", "-loglevel", "error"]
+    for pf in processed_files:
+        concat_cmd.extend(["-i", pf])
+
+    if track_type == "video":
+        # Video-only clips have no audio stream
+        concat_parts = "".join(f"[{i}:v]" for i in range(n))
+        filter_complex = f"{concat_parts}concat=n={n}:v=1:a=0[vout]"
+        concat_cmd.extend([
+            "-filter_complex", filter_complex,
+            "-map", "[vout]",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+            "-pix_fmt", "yuv420p",
+            "-r", str(int(target_fps)),
+        ])
+    else:
+        # Audio clips have both video (black) and audio streams
+        concat_parts = "".join(f"[{i}:v][{i}:a]" for i in range(n))
+        filter_complex = (
+            f"{concat_parts}concat=n={n}:v=1:a=1[vout][aout];"
+            f"[aout]aresample=async=1:first_pts=0[afixed]"
+        )
+        concat_cmd.extend([
+            "-filter_complex", filter_complex,
+            "-map", "[vout]", "-map", "[afixed]",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+            "-c:a", "aac", "-b:a", "192k",
+            "-pix_fmt", "yuv420p",
+            "-r", str(int(target_fps)),
+            "-ar", "48000", "-ac", "2",
+        ])
+
+    concat_cmd.extend([
+        "-avoid_negative_ts", "make_zero",
+        "-movflags", "+faststart",
         merged_file
-    ]
+    ])
+
+    print(f"[BSAI Premiere Pro] Concatenating {n} clips (filter_complex) for {track_type} track {track_index}")
     result = subprocess.run(concat_cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
     if result.returncode != 0:
-        print(f"[BSAI Premiere Pro] Stream copy concat failed for {track_type} track {track_index}, re-encoding...")
-        concat_cmd = [
+        # Fallback: concat demuxer with re-encode (less seamless but more compatible)
+        print(f"[BSAI Premiere Pro] filter_complex concat failed, falling back to concat demuxer:\n{result.stderr}")
+        concat_file = os.path.join(track_temp_dir, "concat_list.txt")
+        with open(concat_file, "w", encoding="utf-8") as f:
+            for pf in processed_files:
+                escaped = pf.replace("\\", "/")
+                f.write(f"file '{escaped}'\n")
+        fallback_cmd = [
             ffmpeg, "-y", "-loglevel", "error",
             "-f", "concat", "-safe", "0", "-i", concat_file,
             "-c:v", "libx264", "-preset", "medium", "-crf", "18",
             "-c:a", "aac", "-b:a", "192k",
             "-pix_fmt", "yuv420p",
+            "-r", str(int(target_fps)),
             "-ar", "48000", "-ac", "2",
+            "-avoid_negative_ts", "make_zero",
+            "-fflags", "+genpts",
+            "-movflags", "+faststart",
             merged_file
         ]
-        result = subprocess.run(concat_cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
+        result = subprocess.run(fallback_cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
         if result.returncode != 0:
             print(f"[BSAI Premiere Pro] Failed to merge {track_type} track {track_index}:\n{result.stderr}")
             return None
@@ -808,25 +848,63 @@ def _process_legacy(enabled_clips, temp_dir, output_path,
     if not processed_files:
         return None, "No clips were successfully processed"
 
-    concat_file = os.path.join(temp_dir, "concat_list.txt")
-    with open(concat_file, "w", encoding="utf-8") as f:
-        for pf in processed_files:
-            escaped = pf.replace("\\", "/")
-            f.write(f"file '{escaped}'\n")
+    # Use filter_complex concat for gapless merging (same as multitrack mode)
+    n = len(processed_files)
+    if n == 1:
+        # Single clip: just copy/re-encode to output
+        shutil.copy2(processed_files[0], output_path)
+        print(f"[BSAI Premiere Pro] Single clip, copied -> {output_path}")
+        return output_path, None
 
-    concat_cmd = [
-        ffmpeg, "-y", "-loglevel", "error",
-        "-f", "concat", "-safe", "0", "-i", concat_file,
+    concat_cmd = [ffmpeg, "-y", "-loglevel", "error"]
+    for pf in processed_files:
+        concat_cmd.extend(["-i", pf])
+
+    # Legacy clips have both video and audio
+    concat_parts = "".join(f"[{i}:v][{i}:a]" for i in range(n))
+    filter_complex = (
+        f"{concat_parts}concat=n={n}:v=1:a=1[vout][aout];"
+        f"[aout]aresample=async=1:first_pts=0[afixed]"
+    )
+    concat_cmd.extend([
+        "-filter_complex", filter_complex,
+        "-map", "[vout]", "-map", "[afixed]",
         "-c:v", video_codec, "-preset", "medium", "-crf", crf,
         "-c:a", "aac", "-b:a", "192k",
         "-pix_fmt", pix_fmt,
+        "-r", str(int(target_fps)),
+        "-ar", "48000", "-ac", "2",
+        "-avoid_negative_ts", "make_zero",
         "-movflags", "+faststart",
         output_path
-    ]
-    print(f"[BSAI Premiere Pro] Merging {len(processed_files)} clips -> {output_path}")
+    ])
+
+    print(f"[BSAI Premiere Pro] Merging {n} clips (filter_complex) -> {output_path}")
     result = subprocess.run(concat_cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
     if result.returncode != 0:
-        return None, f"Failed to merge clips:\n{result.stderr}"
+        # Fallback: concat demuxer with re-encode
+        print(f"[BSAI Premiere Pro] filter_complex concat failed, falling back to concat demuxer:\n{result.stderr}")
+        concat_file = os.path.join(temp_dir, "concat_list.txt")
+        with open(concat_file, "w", encoding="utf-8") as f:
+            for pf in processed_files:
+                escaped = pf.replace("\\", "/")
+                f.write(f"file '{escaped}'\n")
+        fallback_cmd = [
+            ffmpeg, "-y", "-loglevel", "error",
+            "-f", "concat", "-safe", "0", "-i", concat_file,
+            "-c:v", video_codec, "-preset", "medium", "-crf", crf,
+            "-c:a", "aac", "-b:a", "192k",
+            "-pix_fmt", pix_fmt,
+            "-r", str(int(target_fps)),
+            "-ar", "48000", "-ac", "2",
+            "-avoid_negative_ts", "make_zero",
+            "-fflags", "+genpts",
+            "-movflags", "+faststart",
+            output_path
+        ]
+        result = subprocess.run(fallback_cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
+        if result.returncode != 0:
+            return None, f"Failed to merge clips:\n{result.stderr}"
     print(f"[BSAI Premiere Pro] Output saved: {output_path}")
     return output_path, None
 
