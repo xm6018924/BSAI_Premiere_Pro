@@ -123,7 +123,7 @@ const STYLES = `
 .bsai-pp-ruler-spacer {
     min-width: 150px; flex-shrink: 0; border-right: 1px solid #3a3a3a;
 }
-.bsai-pp-ruler-marks { flex: 1; position: relative; height: 100%; padding-left: 4px; }
+.bsai-pp-ruler-marks { flex: 1; position: relative; height: 100%; }
 .bsai-pp-ruler-mark {
     position: absolute; bottom: 0; font-size: 10px; color: #666;
     border-left: 1px solid #333; height: 8px; white-space: nowrap; padding-left: 3px;
@@ -158,14 +158,14 @@ const STYLES = `
 .bsai-pp-track-btn.danger:hover { background: #d35454; color: #fff; }
 .bsai-pp-track-content {
     flex: 1; background: #1a1a1a; display: flex; align-items: stretch;
-    gap: 0; padding: 3px 4px; overflow-x: visible; position: relative; min-height: 34px;
+    gap: 0; padding: 3px 0; overflow-x: visible; position: relative; min-height: 34px;
 }
 .bsai-pp-track-row.video-track .bsai-pp-track-content { min-height: 82px; }
 .bsai-pp-track-empty { color: #444; font-size: 11px; padding: 0 12px; }
 .bsai-pp-clip-block {
     border: 1px solid #3a3a3a; border-radius: 4px; height: 52px; cursor: pointer;
     overflow: hidden; position: relative; transition: border-color 0.2s, box-shadow 0.2s;
-    margin: 0 1px; flex-shrink: 0; display: flex; flex-direction: column; min-width: 50px;
+    margin: 0; flex-shrink: 0; display: flex; flex-direction: column; min-width: 50px;
 }
 .bsai-pp-clip-block.video-clip { background: #2a3a4a; border-color: #3a5a7a; border-left: 3px solid #4a90d9; height: 100%; }
 .bsai-pp-clip-block.audio-clip { background: #2a3a2a; border-color: #3a6a3a; border-left: 3px solid #4caf50; height: 100%; }
@@ -224,9 +224,9 @@ const STYLES = `
 }
 .bsai-pp-transition-arrow {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    min-width: 28px; height: 52px; cursor: pointer; color: #888; font-size: 8px;
-    border-radius: 4px; transition: background 0.2s, color 0.2s; position: relative;
-    user-select: none; gap: 2px; flex-shrink: 0;
+    width: 28px; height: calc(100% - 6px); cursor: pointer; color: #888; font-size: 8px;
+    border-radius: 4px; transition: background 0.2s, color 0.2s; position: absolute;
+    user-select: none; gap: 2px; z-index: 3; top: 3px;
 }
 .bsai-pp-transition-arrow:hover { background: #333; color: #ddd; }
 .bsai-pp-transition-arrow .arrow-icon { font-size: 12px; writing-mode: horizontal-tb; }
@@ -1875,23 +1875,26 @@ class TimelineEditor {
             content.innerHTML = `<span class="bsai-pp-track-empty">空轨道</span>`;
         } else {
             trackClips.forEach((clip, i) => {
-                if (i > 0) {
-                    const arrow = document.createElement("div");
-                    arrow.className = "bsai-pp-transition-arrow";
-                    const transIn = clip.transition_in || "cut";
-                    const icon = isVideo ? (TRANSITION_ICONS[transIn] || "🌫️") : "🎵";
-                    const label = isVideo ? (TRANSITION_LABELS[transIn] || "淡入淡出") : "音频过渡";
-                    arrow.innerHTML = `<span class="arrow-icon">${icon}</span><span class="arrow-label">${label}</span>`;
-                    arrow.title = isVideo
-                        ? `点击切换过渡效果 (当前: ${TRANSITION_LABELS[transIn] || "淡入淡出"})`
-                        : `音频过渡 (当前: ${TRANSITION_LABELS[transIn] || "淡入淡出"})`;
-                    const clipIdx = this.td.clips.indexOf(clip);
-                    arrow.onclick = (e) => { e.stopPropagation(); this._showTransitionPopup(arrow, clipIdx); };
-                    content.appendChild(arrow);
-                }
                 const clipIdx = this.td.clips.indexOf(clip);
                 content.appendChild(this._createClipBlock(clip, clipIdx));
             });
+            for (let i = 1; i < trackClips.length; i++) {
+                const clipIdx = this.td.clips.indexOf(trackClips[i]);
+                const block = content.querySelector(`[data-clip-idx="${clipIdx}"]`);
+                if (!block) continue;
+                const arrow = document.createElement("div");
+                arrow.className = "bsai-pp-transition-arrow";
+                arrow.style.left = (block.offsetLeft - 14) + "px";
+                const transIn = trackClips[i].transition_in || "cut";
+                const icon = isVideo ? (TRANSITION_ICONS[transIn] || "🌫️") : "🎵";
+                const label = isVideo ? (TRANSITION_LABELS[transIn] || "淡入淡出") : "音频过渡";
+                arrow.innerHTML = `<span class="arrow-icon">${icon}</span><span class="arrow-label">${label}</span>`;
+                arrow.title = isVideo
+                    ? `点击切换过渡效果 (当前: ${TRANSITION_LABELS[transIn] || "淡入淡出"})`
+                    : `音频过渡 (当前: ${TRANSITION_LABELS[transIn] || "淡入淡出"})`;
+                arrow.onclick = (e) => { e.stopPropagation(); this._showTransitionPopup(arrow, clipIdx); };
+                content.appendChild(arrow);
+            }
         }
         row.appendChild(content);
         this._attachBoxSelection(content, trackType, trackIndex);
