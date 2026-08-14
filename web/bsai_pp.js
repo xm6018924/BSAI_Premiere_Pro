@@ -260,7 +260,7 @@ const STYLES = `
     width: 100%;
 }
 .bsai-pp-edit-section {
-    height: 260px; flex-shrink: 0; overflow-y: auto;
+    height: 260px; min-height: 200px; flex-shrink: 0; overflow-y: auto;
     background: #222; display: flex; flex-direction: column;
 }
 .bsai-pp-edit-content { padding: 12px 16px; }
@@ -299,7 +299,7 @@ const STYLES = `
     width: 100%; height: 100%; top: 0; left: 0; transform: none;
 }
 .bsai-pp-timeline-preview video {
-    width: 100%; height: 100%; object-fit: contain; background: #000;
+    max-width: 100%; max-height: 100%; object-fit: contain; background: #000;
     transition: transform 0.1s ease;
 }
 .bsai-pp-timeline-preview .preview-close {
@@ -1136,7 +1136,9 @@ class TimelineEditor {
     }
 
     _injectStyles() {
-        if (document.getElementById("bsai-pp-styles")) return;
+        // Always remove old styles and re-inject fresh to ensure latest CSS is applied
+        const existing = document.getElementById("bsai-pp-styles");
+        if (existing) existing.remove();
         const el = document.createElement("style");
         el.id = "bsai-pp-styles";
         el.textContent = STYLES;
@@ -2198,7 +2200,7 @@ class TimelineEditor {
         // Create inline video element inside the clip block's thumbnail
         const video = document.createElement("video");
         video.className = "bsai-pp-inline-video";
-        video.style.cssText = "width:100%;height:100%;object-fit:contain;position:absolute;top:0;left:0;background:#000;z-index:5;";
+        video.style.cssText = "width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0;background:#000;z-index:5;";
         video.src = videoSrc;
         thumbDiv.appendChild(video);
 
@@ -3819,8 +3821,30 @@ class TimelineEditor {
             // Reset zoom
             this._previewZoom = 1;
             video.style.transform = "";
-            video.style.width = "100%";
-            video.style.height = "100%";
+            // Adapt video element size to match video aspect ratio (no black bars, no cropping)
+            video.style.width = "auto";
+            video.style.height = "auto";
+            video.style.maxWidth = "100%";
+            video.style.maxHeight = "100%";
+            video.style.objectFit = "contain";
+            video.onloadedmetadata = () => {
+                const vw = video.videoWidth || 1920;
+                const vh = video.videoHeight || 1080;
+                const aspect = vw / vh;
+                const maxW = overlay.clientWidth;
+                const maxH = overlay.clientHeight;
+                const containerAspect = maxW / maxH;
+                if (aspect > containerAspect) {
+                    // Wider video: fit width
+                    video.style.width = "100%";
+                    video.style.height = "auto";
+                } else {
+                    // Taller video: fit height
+                    video.style.height = "100%";
+                    video.style.width = "auto";
+                }
+                video.style.objectFit = "fill"; // fill the element exactly (element already matches ratio)
+            };
             video.play().catch(() => {});
             // Add timeupdate for progress bar
             video.ontimeupdate = () => {
