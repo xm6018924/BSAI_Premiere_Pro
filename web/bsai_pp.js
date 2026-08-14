@@ -4026,120 +4026,59 @@ class TimelineEditor {
     }
 
     async _replaceVideo(index) {
-        const dir = this._getWidgetValue("watch_directory", "output");
+        const watchDir = this._getWidgetValue("watch_directory", "output");
+        let initialPath = "";
+        if (watchDir && watchDir !== "output") initialPath = watchDir;
+        const selected = await browseFilesDialog(initialPath);
+        if (!selected || selected.length === 0) return;
+        const file = selected[0];
         try {
-            const resp = await api.fetchApi(`/bsai_premiere_pro/scan?directory=${encodeURIComponent(dir)}`);
-            const data = await resp.json();
-            const files = data.files || [];
-            if (files.length === 0) { this._toast("目录中没有视频文件", "info"); return; }
-            const overlay = document.createElement("div");
-            overlay.className = "bsai-pp-dialog-overlay";
-            const dialog = document.createElement("div");
-            dialog.className = "bsai-pp-import-dialog";
-            dialog.innerHTML = `
-                <h3>替换视频 - 选择新视频文件</h3>
-                <div class="bsai-pp-import-list">
-                    ${files.map(f => `
-                        <div class="bsai-pp-import-item" data-path="${escapeHtml(f.file_path)}" data-name="${escapeHtml(f.file_name)}">
-                            <span>🎬</span>
-                            <span>${escapeHtml(f.file_name)}</span>
-                            <span class="size">${(f.size / 1024 / 1024).toFixed(1)} MB</span>
-                        </div>
-                    `).join("")}
-                </div>
-                <div style="display:flex;gap:8px;justify-content:flex-end;">
-                    <button class="bsai-pp-btn" data-cancel>取消</button>
-                </div>`;
-            overlay.appendChild(dialog);
-            document.body.appendChild(overlay);
-            _addMaximizeBtn(dialog);
-            dialog.querySelector("[data-cancel]").onclick = () => overlay.remove();
-            dialog.querySelectorAll(".bsai-pp-import-item").forEach(item => {
-                item.onclick = async () => {
-                    const filePath = item.getAttribute("data-path");
-                    const fileName = item.getAttribute("data-name");
-                    overlay.remove();
-                    try {
-                        const metaResp = await api.fetchApi(`/bsai_premiere_pro/metadata?file=${encodeURIComponent(filePath)}`);
-                        const meta = await metaResp.json();
-                        const clip = this.td.clips[index];
-                        clip.file_path = filePath;
-                        clip.file_name = fileName;
-                        clip.duration = meta.duration || 0;
-                        clip.width = meta.width || 1920;
-                        clip.height = meta.height || 1080;
-                        clip.fps = meta.fps || 30;
-                        clip.has_audio = meta.has_audio || false;
-                        clip.trim_start = 0;
-                        clip.trim_end = meta.duration || 0;
-                        if (clip.linked_id) {
-                            const linked = this.td.clips.find(c => c.id === clip.linked_id);
-                            if (linked) {
-                                linked.file_path = filePath;
-                                linked.file_name = fileName;
-                                linked.duration = meta.duration || 0;
-                                linked.has_audio = meta.has_audio || false;
-                                linked.trim_start = 0;
-                                linked.trim_end = meta.duration || 0;
-                            }
-                        }
-                        this.thumbCache.delete(filePath);
-                        this._save();
-                        this._renderAll();
-                        this._toast("视频已替换", "success");
-                    } catch (e) {
-                        this._toast("替换失败: " + e.message, "error");
-                    }
-                };
-            });
+            const metaResp = await api.fetchApi(`/bsai_premiere_pro/metadata?file=${encodeURIComponent(file.path)}`);
+            const meta = await metaResp.json();
+            if (meta.error) { this._toast(`无法读取 ${file.name}: ${meta.error}`, "error"); return; }
+            const clip = this.td.clips[index];
+            clip.file_path = file.path;
+            clip.file_name = file.name;
+            clip.duration = meta.duration || 0;
+            clip.width = meta.width || 1920;
+            clip.height = meta.height || 1080;
+            clip.fps = meta.fps || 30;
+            clip.has_audio = meta.has_audio || false;
+            clip.trim_start = 0;
+            clip.trim_end = meta.duration || 0;
+            if (clip.linked_id) {
+                const linked = this.td.clips.find(c => c.id === clip.linked_id);
+                if (linked) {
+                    linked.file_path = file.path;
+                    linked.file_name = file.name;
+                    linked.duration = meta.duration || 0;
+                    linked.has_audio = meta.has_audio || false;
+                    linked.trim_start = 0;
+                    linked.trim_end = meta.duration || 0;
+                }
+            }
+            this.thumbCache.delete(file.path);
+            this._save();
+            this._renderAll();
+            this._toast("视频已替换", "success");
         } catch (e) {
-            this._toast("获取文件列表失败: " + e.message, "error");
+            this._toast("替换失败: " + e.message, "error");
         }
     }
 
     async _browseAudio(clip) {
-        const dir = this._getWidgetValue("watch_directory", "output");
-        try {
-            const resp = await api.fetchApi(`/bsai_premiere_pro/audio_files?directory=${encodeURIComponent(dir)}`);
-            const data = await resp.json();
-            const files = data.files || [];
-            if (files.length === 0) { this._toast("目录中没有音频文件", "info"); return; }
-            const overlay = document.createElement("div");
-            overlay.className = "bsai-pp-dialog-overlay";
-            const dialog = document.createElement("div");
-            dialog.className = "bsai-pp-import-dialog";
-            dialog.innerHTML = `
-                <h3>选择替换音频文件</h3>
-                <div class="bsai-pp-import-list">
-                    ${files.map(f => `
-                        <div class="bsai-pp-import-item" data-path="${escapeHtml(f.file_path)}">
-                            <span>🎵</span>
-                            <span>${escapeHtml(f.file_name)}</span>
-                            <span class="size">${(f.size / 1024).toFixed(0)} KB</span>
-                        </div>
-                    `).join("")}
-                </div>
-                <div style="display:flex;gap:8px;justify-content:flex-end;">
-                    <button class="bsai-pp-btn" data-cancel>取消</button>
-                </div>`;
-            overlay.appendChild(dialog);
-            document.body.appendChild(overlay);
-            _addMaximizeBtn(dialog);
-            dialog.querySelector("[data-cancel]").onclick = () => overlay.remove();
-            dialog.querySelectorAll(".bsai-pp-import-item").forEach(item => {
-                item.onclick = () => {
-                    clip.audio_replacement = item.getAttribute("data-path");
-                    const inp = this.modal.querySelector('[data-field="audio_replacement"]');
-                    if (inp) inp.value = clip.audio_replacement;
-                    overlay.remove();
-                    this._save();
-                    this._renderTimeline();
-                    this._toast("音频已替换", "success");
-                };
-            });
-        } catch (e) {
-            this._toast("获取音频列表失败: " + e.message, "error");
-        }
+        const watchDir = this._getWidgetValue("watch_directory", "output");
+        let initialPath = "";
+        if (watchDir && watchDir !== "output") initialPath = watchDir;
+        const selected = await browseFilesDialog(initialPath);
+        if (!selected || selected.length === 0) return;
+        const file = selected[0];
+        clip.audio_replacement = file.path;
+        const inp = this.modal.querySelector('[data-field="audio_replacement"]');
+        if (inp) inp.value = file.path;
+        this._save();
+        this._renderTimeline();
+        this._toast("音频已替换", "success");
     }
 
     async _renderVideo() {
