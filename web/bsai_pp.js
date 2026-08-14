@@ -1034,7 +1034,8 @@ class AutoImporter {
                 const aId = `clip_${Date.now() + 1}_${Math.random().toString(36).substr(2, 6)}`;
                 const isAudioOnly = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(file.file_name || "");
                 const hasAudioSuffix = /[-_]audio[-_]?\d*\.\w+$/i.test(file.file_name || "");
-                const treatAsAudioOnly = isAudioOnly || hasAudioSuffix;
+                const hasVideoStream = (meta.width || 0) > 0 && (meta.height || 0) > 0;
+                const treatAsAudioOnly = (isAudioOnly || hasAudioSuffix) && !hasVideoStream;
                 const isImage = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(file.file_name || "");
                 const hasAudio = meta.has_audio || false;
                 const clipDuration = isImage ? 5 : (meta.duration || 0);
@@ -4108,7 +4109,8 @@ class TimelineEditor {
             const isImage = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(file.file_name || "");
             const isAudioOnly = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(file.file_name || "");
             const hasAudioSuffix = /[-_]audio[-_]?\d*\.\w+$/i.test(file.file_name || "");
-            const treatAsAudioOnly = isAudioOnly || hasAudioSuffix;
+            const hasVideoStream = (meta.width || 0) > 0 && (meta.height || 0) > 0;
+            const treatAsAudioOnly = (isAudioOnly || hasAudioSuffix) && !hasVideoStream;
             const duration = meta.duration || (isImage ? 5 : 0);
             const hasAudio = meta.has_audio || false;
             const vId = `clip_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
