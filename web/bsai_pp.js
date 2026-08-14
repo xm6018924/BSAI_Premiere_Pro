@@ -1727,6 +1727,10 @@ class TimelineEditor {
                 const scrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
                 const totalX = x + scrollLeft;
                 this._playheadTime = totalX / pps;
+                if (!this._isPlaying) {
+                    const inlineVideo = this.modal.querySelector(".bsai-pp-inline-video");
+                    if (inlineVideo) this._stopPlayback();
+                }
                 this._renderTimelinePlayhead();
                 if (this.scissorMode) {
                     this._cutAtPlayhead();
@@ -2366,11 +2370,27 @@ class TimelineEditor {
                 return;
             }
         }
-        // Fresh start: play from selected video clip, or first if none selected
+        // Fresh start: play from playhead position, or selected clip, or first
         this._playClips = videoClips;
-        // Find the index of the currently selected clip in the videoClips array
         let startIdx = 0;
-        if (this.selectedIndex >= 0 && this.td.clips[this.selectedIndex]) {
+        this._playStartOffset = null;
+        // Priority 1: If playhead is set, find the clip at playhead position
+        if (this._playheadTime !== null && this._playheadTime !== undefined) {
+            const phTime = this._playheadTime;
+            for (let i = 0; i < videoClips.length; i++) {
+                const clip = videoClips[i];
+                const clipStart = this._getClipStartTime(clip);
+                const clipDur = (clip.trim_end || 0) - (clip.trim_start || 0);
+                const clipEnd = clipStart + clipDur;
+                if (phTime >= clipStart && phTime < clipEnd) {
+                    startIdx = i;
+                    this._playStartOffset = (clip.trim_start || 0) + (phTime - clipStart);
+                    break;
+                }
+            }
+        }
+        // Priority 2: Fall back to selected clip
+        if (this._playStartOffset === null && this.selectedIndex >= 0 && this.td.clips[this.selectedIndex]) {
             const selectedClip = this.td.clips[this.selectedIndex];
             if (selectedClip.track_type === "video" && selectedClip.video_enabled !== false) {
                 const foundIdx = videoClips.indexOf(selectedClip);
@@ -2483,8 +2503,10 @@ class TimelineEditor {
         };
 
         video.onloadedmetadata = () => {
-            if (trimStart > 0) {
-                try { video.currentTime = trimStart; } catch {}
+            const seekTo = this._playStartOffset != null ? this._playStartOffset : trimStart;
+            this._playStartOffset = null;
+            if (seekTo > 0) {
+                try { video.currentTime = seekTo; } catch {}
             }
             video.play().catch(() => {});
         };
