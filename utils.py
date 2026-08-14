@@ -169,6 +169,52 @@ def generate_thumbnail(file_path, thumb_time=None, width=160):
             pass
 
 
+def generate_filmstrip(file_path, num_frames=10, height=80):
+    """Generate a horizontal filmstrip of evenly-spaced frames.
+
+    Uses ffmpeg's fps + tile filters to extract N frames at evenly-spaced
+    timestamps and arrange them in a single wide image. Each frame is scaled
+    to the target height, preserving aspect ratio. This fills wide thumbnail
+    areas for vertical videos without black bars.
+    """
+    ffmpeg = get_ffmpeg()
+    if not ffmpeg or not os.path.exists(file_path):
+        return None
+    info = get_video_info(file_path)
+    if not info or info["duration"] <= 0:
+        return generate_thumbnail(file_path)
+    duration = info["duration"]
+    num_frames = max(3, min(num_frames, 20))
+    fps = num_frames / duration
+    temp_file = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+    temp_file.close()
+    try:
+        vf = (
+            f"fps={fps},"
+            f"scale=-1:{height},"
+            f"tile={num_frames}x1"
+        )
+        cmd = [
+            ffmpeg, "-i", file_path,
+            "-frames:v", "1", "-vf", vf, "-q:v", "5",
+            "-y", temp_file.name
+        ]
+        result = subprocess.run(cmd, capture_output=True, timeout=20)
+        if result.returncode != 0 or not os.path.exists(temp_file.name):
+            return generate_thumbnail(file_path)
+        with open(temp_file.name, "rb") as f:
+            data = base64.b64encode(f.read()).decode()
+        return f"data:image/jpeg;base64,{data}"
+    except Exception as e:
+        print(f"[BSAI Premiere Pro] Error generating filmstrip: {e}")
+        return generate_thumbnail(file_path)
+    finally:
+        try:
+            os.unlink(temp_file.name)
+        except Exception:
+            pass
+
+
 def generate_waveform(file_path, num_samples=200):
     """Generate waveform amplitude data from an audio/video file.
 

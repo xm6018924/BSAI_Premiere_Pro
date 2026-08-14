@@ -9,6 +9,7 @@ from aiohttp import web
 from .utils import (
     scan_video_directory, scan_audio_files,
     get_video_info, generate_thumbnail, generate_waveform,
+    generate_filmstrip,
     process_and_merge, format_time,
     _resolve_directory,
 )
@@ -50,6 +51,24 @@ async def get_thumbnail(request):
     if thumb is None:
         return web.json_response({"error": "Failed to generate thumbnail"}, status=500)
     return web.json_response({"thumbnail": thumb})
+
+
+@PromptServer.instance.routes.get("/bsai_premiere_pro/filmstrip")
+async def get_filmstrip(request):
+    import asyncio
+    file_path = request.query.get("file", "")
+    file_path = urllib.parse.unquote(file_path)
+    if not file_path or not os.path.exists(file_path):
+        return web.json_response({"error": "File not found"}, status=404)
+    count = int(request.query.get("count", "10"))
+    height = int(request.query.get("height", "80"))
+    try:
+        strip = await asyncio.to_thread(generate_filmstrip, file_path, count, height)
+        if strip is None:
+            return web.json_response({"error": "Failed to generate filmstrip"}, status=500)
+        return web.json_response({"filmstrip": strip})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
 
 
 @PromptServer.instance.routes.get("/bsai_premiere_pro/waveform")

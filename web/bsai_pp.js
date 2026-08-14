@@ -192,7 +192,7 @@ const STYLES = `
     justify-content: center; overflow: hidden; position: relative; min-height: 30px;
 }
 .bsai-pp-clip-block.video-clip .bsai-pp-clip-thumb { min-height: 50px; flex: 1 1 auto; }
-.bsai-pp-clip-thumb img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; object-position: center; background: #000; }
+.bsai-pp-clip-thumb img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; background: #000; }
 .bsai-pp-clip-thumb .placeholder { color: #555; font-size: 14px; }
 .bsai-pp-clip-waveform { width: 100%; height: 100%; object-fit: cover; background: #1a2a1a; }
 .bsai-pp-clip-waveform-canvas { width: 100%; height: 100%; display: block; background: #1a2a1a; }
@@ -3084,7 +3084,7 @@ class TimelineEditor {
     }
 
     async _loadThumbnails() {
-        // Load video thumbnails
+        // Load video thumbnails as filmstrips (multiple keyframes fill width)
         const thumbs = this.modal.querySelectorAll("[data-thumb]");
         for (const el of thumbs) {
             const path = el.getAttribute("data-thumb");
@@ -3099,12 +3099,13 @@ class TimelineEditor {
                 continue;
             }
             try {
-                const resp = await api.fetchApi(`/bsai_premiere_pro/thumbnail?file=${encodeURIComponent(path)}`);
+                const elHeight = el.offsetHeight || 80;
+                const resp = await api.fetchApi(`/bsai_premiere_pro/filmstrip?file=${encodeURIComponent(path)}&height=${elHeight}`);
                 if (!resp.ok) { this.thumbCache.set(path, null); continue; }
                 const data = await resp.json();
-                if (data.thumbnail) {
-                    this.thumbCache.set(path, data.thumbnail);
-                    el.innerHTML = `<img src="${data.thumbnail}">`;
+                if (data.filmstrip) {
+                    this.thumbCache.set(path, data.filmstrip);
+                    el.innerHTML = `<img src="${data.filmstrip}">`;
                     badges.forEach(b => el.appendChild(b));
                 } else {
                     this.thumbCache.set(path, null);
