@@ -2369,7 +2369,16 @@ class TimelineEditor {
                 this._pausedVideoTime = null;
                 const btn = this.modal.querySelector("#bsai-pp-play-btn");
                 if (btn) btn.textContent = "⏸️ 暂停";
-                inlineVideo.play().catch(() => {});
+                if (inlineVideo.tagName === "VIDEO") {
+                    inlineVideo.play().catch(() => {});
+                } else {
+                    // Image: restart animation from paused position
+                    const clip = this._playClips[this._playClipIndex];
+                    if (clip && this._imageElapsed != null) {
+                        this._playStartOffset = (clip.trim_start || 0) + this._imageElapsed;
+                    }
+                    this._playNextClip();
+                }
                 return;
             }
         }
@@ -2419,10 +2428,10 @@ class TimelineEditor {
         const filePath = clip.file_path || "";
         const trimStart = clip.trim_start || 0;
         const trimEnd = clip.trim_end || clip.duration || 0;
-        const videoSrc = `/bsai_premiere_pro/stream?file=${encodeURIComponent(filePath)}`;
 
-        // Remove any previous inline video
-        this.modal.querySelectorAll(".bsai-pp-inline-video").forEach(v => { v.pause(); v.remove(); });
+        // Remove any previous inline video/image
+        this.modal.querySelectorAll(".bsai-pp-inline-video").forEach(v => { v.pause?.(); v.remove(); });
+        this.modal.querySelectorAll(".bsai-pp-inline-image").forEach(v => { v.remove(); });
 
         // Find the clip block element on the timeline
         const clipIdx = this.td.clips.indexOf(clip);
@@ -2430,26 +2439,88 @@ class TimelineEditor {
         const thumbDiv = clipBlock?.querySelector(".bsai-pp-clip-thumb");
 
         if (!thumbDiv) {
-            // Fallback: if clip block not found, skip to next
             this._playClipIndex++;
             this._playNextClip();
             return;
         }
 
-        // Create inline video element inside the clip block's thumbnail
+        // Update playhead position
+        this._updatePlayhead(clip);
+        const clipDur = trimEnd - trimStart;
+
+        // ── Image clip: display as <img> for its timeline duration ──
+        if (clip.is_image) {
+            const img = document.createElement("img");
+            img.className = "bsai-pp-inline-image bsai-pp-inline-video";
+            img.style.cssText = "width:100%;height:100%;object-fit:contain;position:absolute;top:0;left:0;background:#000;z-index:5;";
+            img.src = `/bsai_premiere_pro/stream?file=${encodeURIComponent(filePath)}`;
+            thumbDiv.appendChild(img);
+
+            if (clipBlock) {
+                clipBlock.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+            }
+
+            // Calculate remaining duration if resuming from playhead offset
+            let imgStartOffset = 0;
+            if (this._playStartOffset != null) {
+                imgStartOffset = Math.max(0, this._playStartOffset - trimStart);
+                this._playStartOffset = null;
+            }
+            const remainingDur = Math.max(0.1, clipDur - imgStartOffset) * 1000;
+
+            const imgStartTime = performance.now();
+            const clipStartOffset = imgStartOffset;
+
+            // Animate playhead across the image clip
+            const animateImg = () => {
+                if (!this._isPlaying) return;
+                const elapsed = (performance.now() - imgStartTime) / 1000 + clipStartOffset;
+                this._imageElapsed = elapsed;
+                if (elapsed >= clipDur) {
+                    img.remove();
+                    this._playClipIndex++;
+                    this._playNextClip();
+                    return;
+                }
+                // Animate playhead
+                const playhead = this.modal.querySelector(".bsai-pp-playhead");
+                if (playhead) {
+                    const container = this.modal.querySelector("[data-track-container]");
+                    if (container && clipBlock) {
+                        const containerRect = container.getBoundingClientRect();
+                        const blockRect = clipBlock.getBoundingClientRect();
+                        const blockLeft = blockRect.left - containerRect.left;
+                        const pps = this._pps || 15;
+                        playhead.style.left = (blockLeft + elapsed * pps) + "px";
+                    }
+                }
+                // Update footer
+                const footerInfo = this.modal.querySelector("[data-footer-info]");
+                if (footerInfo) {
+                    footerInfo.textContent = `▶ ${clip.file_name || ""} | ${formatTime(elapsed)} / ${formatTime(clipDur)} | ${this._playClipIndex + 1}/${this._playClips.length}`;
+                }
+                requestAnimationFrame(animateImg);
+            };
+            requestAnimationFrame(animateImg);
+
+            const footerInfo = this.modal.querySelector("[data-footer-info]");
+            if (footerInfo) {
+                footerInfo.textContent = `▶ 播放中: ${clip.file_name} (${this._playClipIndex + 1}/${this._playClips.length})`;
+            }
+            return;
+        }
+
+        // ── Video clip: create <video> element ──
+        const videoSrc = `/bsai_premiere_pro/stream?file=${encodeURIComponent(filePath)}`;
         const video = document.createElement("video");
         video.className = "bsai-pp-inline-video";
         video.style.cssText = "width:100%;height:100%;object-fit:contain;position:absolute;top:0;left:0;background:#000;z-index:5;";
         video.src = videoSrc;
 
-        // Determine if audio should be muted:
-        // 1. Video clip's linked audio was deleted (linked_id is null but has_audio)
-        // 2. Linked audio clip is a gap placeholder
-        // 3. Audio track is muted
+        // Determine if audio should be muted
         let shouldMute = false;
         if (clip.has_audio !== false) {
             if (!clip.linked_id) {
-                // Audio was unlinked/deleted - mute the video's embedded audio
                 shouldMute = true;
             } else {
                 const linkedAudio = this.td.clips.find(c => c.id === clip.linked_id);
@@ -2460,7 +2531,6 @@ class TimelineEditor {
                 }
             }
         }
-        // Check if the audio track itself is muted
         if (!shouldMute && clip.linked_id) {
             const linkedAudio = this.td.clips.find(c => c.id === clip.linked_id);
             if (linkedAudio && linkedAudio.track_index != null) {
@@ -2473,34 +2543,23 @@ class TimelineEditor {
 
         thumbDiv.appendChild(video);
 
-        // Apply position offset
         const posX = clip.pos_x ?? 0;
         const posY = clip.pos_y ?? 0;
         video.style.transform = `translate(${posX}%, ${posY}%)`;
 
-        // Scroll to show current clip
         if (clipBlock) {
             clipBlock.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
         }
 
-        // Update playhead position
-        this._updatePlayhead(clip);
-
-        const clipDur = trimEnd - trimStart;
-
-        // Guard flag: ensure onEnded only fires once per video
         let clipEnded = false;
         const advanceToNext = () => {
             if (clipEnded) return;
             clipEnded = true;
-            // Detach all handlers to prevent any further callbacks
             video.onended = null;
             video.ontimeupdate = null;
             video.onloadedmetadata = null;
-            // Remove this video element
             video.pause();
             video.remove();
-            // Advance to next clip
             this._playClipIndex++;
             this._playNextClip();
         };
@@ -2519,9 +2578,7 @@ class TimelineEditor {
                 advanceToNext();
                 return;
             }
-            // Animate playhead
             this._animatePlayhead();
-            // Update footer info
             const footerInfo = this.modal.querySelector("[data-footer-info]");
             if (footerInfo) {
                 const elapsed = Math.max(0, video.currentTime - trimStart);
@@ -2533,7 +2590,6 @@ class TimelineEditor {
             advanceToNext();
         };
 
-        // Show clip info in footer
         const footerInfo = this.modal.querySelector("[data-footer-info]");
         if (footerInfo) {
             footerInfo.textContent = `▶ 播放中: ${clip.file_name} (${this._playClipIndex + 1}/${this._playClips.length})`;
@@ -2544,13 +2600,16 @@ class TimelineEditor {
         this._isPlaying = false;
         const inlineVideo = this.modal.querySelector(".bsai-pp-inline-video");
         if (inlineVideo) {
-            // Store paused position for scissor tool
             const currentClip = this._playClips?.[this._playClipIndex];
-            if (currentClip && inlineVideo.currentTime != null) {
+            if (currentClip) {
                 this._pausedClip = currentClip;
-                this._pausedVideoTime = inlineVideo.currentTime;
+                if (inlineVideo.tagName === "VIDEO" && inlineVideo.currentTime != null) {
+                    this._pausedVideoTime = inlineVideo.currentTime;
+                } else if (this._imageElapsed != null) {
+                    this._pausedVideoTime = (currentClip.trim_start || 0) + this._imageElapsed;
+                }
             }
-            inlineVideo.pause();
+            if (inlineVideo.pause) inlineVideo.pause();
         }
         const btn = this.modal.querySelector("#bsai-pp-play-btn");
         if (btn) btn.textContent = "▶️ 播放";
@@ -2566,7 +2625,7 @@ class TimelineEditor {
         this._pausedClip = null;
         this._pausedVideoTime = null;
         // Remove all inline videos from clip blocks
-        this.modal.querySelectorAll(".bsai-pp-inline-video").forEach(v => { v.pause(); v.remove(); });
+        this.modal.querySelectorAll(".bsai-pp-inline-video").forEach(v => { v.pause?.(); v.remove(); });
         // Remove playhead
         this._removePlayhead();
         // Only hide timeline preview overlay if it was used for inline playback (not render preview)
