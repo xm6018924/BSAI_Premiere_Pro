@@ -1631,10 +1631,30 @@ class TimelineEditor {
         this._renderTimeline();
     }
 
+    // Calculate dynamic track heights based on zoom level and available space
+    _getTrackHeights() {
+        const zoom = this._zoomLevel || 1;
+        // Base heights at zoom=1
+        const baseVideoH = 90;
+        const baseAudioH = 40;
+        // Scale video height with zoom, audio slightly
+        let videoH = Math.round(baseVideoH * Math.sqrt(zoom));
+        let audioH = Math.round(baseAudioH * Math.max(1, Math.sqrt(zoom) * 0.7));
+        // Cap at reasonable maximums
+        videoH = Math.min(videoH, 500);
+        audioH = Math.min(audioH, 120);
+        return { videoH, audioH };
+    }
+
     _createTrackRow(trackType, trackIndex, trackInfo) {
          const row = document.createElement("div");
         const isVideo = trackType === "video";
         row.className = "bsai-pp-track-row" + (isVideo ? " video-track" : " audio-track");
+        // Apply dynamic track height based on zoom level
+        const { videoH, audioH } = this._getTrackHeights();
+        const trackH = isVideo ? videoH : audioH;
+        row.style.minHeight = trackH + "px";
+        row.style.height = trackH + "px";
         const trackName = trackInfo.name || (isVideo ? `V${trackIndex + 1}` : `A${trackIndex + 1}`);
 
         const header = document.createElement("div");
@@ -1664,6 +1684,8 @@ class TimelineEditor {
 
         const content = document.createElement("div");
         content.className = "bsai-pp-track-content";
+        // Override fixed CSS min-height to use dynamic height
+        content.style.minHeight = (trackH - 8) + "px";
         const rulerWidth = Math.round(((this._totalDuration || 30) + 10) * (this._pps || 15));
         content.style.minWidth = rulerWidth + "px";
         const trackClips = this._getClipsForTrack(trackType, trackIndex);
@@ -3101,6 +3123,9 @@ class TimelineEditor {
                 <button class="bsai-pp-btn" data-act="move-left">◀ 左移</button>
                 <button class="bsai-pp-btn" data-act="move-right">右移 ▶</button>
                 ${isVideo ? '<button class="bsai-pp-btn" data-act="replace-video">替换视频文件</button>' : ""}
+                ${isLinked
+                    ? '<button class="bsai-pp-btn" data-act="toggle-link" style="border-color:#ffa726;color:#ffa726;">🔓 取消关联</button>'
+                    : '<button class="bsai-pp-btn" data-act="toggle-link" style="border-color:#4a90d9;color:#4a90d9;">🔗 建立关联</button>'}
                 ${isLinked ? '<button class="bsai-pp-btn" data-act="sync-linked">🔄 同步链接</button>' : ""}
                 <button class="bsai-pp-btn bsai-pp-btn-danger" data-act="delete">🗑 删除片段</button>
             </div>`;
@@ -3137,8 +3162,8 @@ class TimelineEditor {
             if (input.type === "range") input.oninput = handler;
         });
 
-        const linkBadge = panel.querySelector('[data-act="toggle-link"]');
-        if (linkBadge) linkBadge.onclick = () => this._toggleLink(clip);
+        const linkBadges = panel.querySelectorAll('[data-act="toggle-link"]');
+        linkBadges.forEach(btn => btn.onclick = () => this._toggleLink(clip));
 
         panel.querySelector('[data-act="move-left"]').onclick = () => this._moveClip(this.selectedIndex, -1);
         panel.querySelector('[data-act="move-right"]').onclick = () => this._moveClip(this.selectedIndex, 1);
