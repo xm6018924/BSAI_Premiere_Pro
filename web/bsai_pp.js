@@ -920,6 +920,58 @@ class AutoImporter {
         }
     }
 
+    _autoLinkAndAlign(td) {
+        if (!td.clips || td.clips.length === 0) return;
+        const unlinkedVideos = td.clips.filter(c => c.track_type === "video" && !c.linked_id);
+        const unlinkedAudios = td.clips.filter(c => c.track_type === "audio" && !c.linked_id);
+        for (const audio of unlinkedAudios) {
+            let audioBase = (audio.file_name || "").replace(/\.[^.]+$/, "");
+            audioBase = audioBase.replace(/-audio$/i, "");
+            for (const video of unlinkedVideos) {
+                if (video.linked_id) continue;
+                let videoBase = (video.file_name || "").replace(/\.[^.]+$/, "");
+                if (videoBase === audioBase) {
+                    video.linked_id = audio.id;
+                    audio.linked_id = video.id;
+                    audio.trim_start = video.trim_start;
+                    audio.trim_end = video.trim_end;
+                    audio.transition_in = video.transition_in;
+                    audio.transition_out = video.transition_out;
+                    audio.transition_duration = video.transition_duration;
+                    break;
+                }
+            }
+        }
+        const videoClips = td.clips.filter(c => c.track_type === "video");
+        const allAudioClips = td.clips.filter(c => c.track_type === "audio");
+        const usedAudioIds = new Set();
+        const newClips = [];
+        for (const vClip of videoClips) {
+            newClips.push(vClip);
+            const vDur = (vClip.trim_end - vClip.trim_start) || 0;
+            if (vClip.linked_id) {
+                const aClip = allAudioClips.find(c => c.id === vClip.linked_id);
+                if (aClip && !usedAudioIds.has(aClip.id)) {
+                    newClips.push(aClip);
+                    usedAudioIds.add(aClip.id);
+                    continue;
+                }
+            }
+            newClips.push({
+                id: `gap_${vClip.id}_${Date.now()}`,
+                track_type: "audio", track_index: 0,
+                file_path: null, file_name: "(gap)",
+                duration: vDur, trim_start: 0, trim_end: vDur,
+                is_gap: true, linked_id: null,
+                transition_in: "cut", transition_out: "cut", transition_duration: 0,
+            });
+        }
+        for (const aClip of allAudioClips) {
+            if (!usedAudioIds.has(aClip.id)) newClips.push(aClip);
+        }
+        td.clips = newClips;
+    }
+
     async addNewFiles(files) {
         let td;
         try { td = JSON.parse(this.node.properties?.bsai_td || '{}'); } catch { td = { clips: [], known_files: [], filter_audio_only: false }; }
@@ -979,6 +1031,8 @@ class AutoImporter {
                 console.error("[BSAI PP] Failed to add file:", file.file_name, e);
             }
         }
+        // Auto-link by name pattern and align audio to video order
+        this._autoLinkAndAlign(td);
         const tdJson = JSON.stringify(td);
         if (!this.node.properties) this.node.properties = {};
         this.node.properties.bsai_td = tdJson;
@@ -3509,6 +3563,52 @@ class TimelineEditor {
         if (linked > 0) {
             this._toast(`自动配对 ${linked} 组音视频`, "success");
         }
+        this._alignAudioToVideo();
+    }
+
+    _alignAudioToVideo() {
+        const videoClips = this.td.clips.filter(c => c.track_type === "video");
+        const allAudioClips = this.td.clips.filter(c => c.track_type === "audio");
+        const usedAudioIds = new Set();
+        const newClips = [];
+
+        for (const vClip of videoClips) {
+            newClips.push(vClip);
+            const vDur = (vClip.trim_end - vClip.trim_start) || 0;
+            if (vClip.linked_id) {
+                const aClip = allAudioClips.find(c => c.id === vClip.linked_id);
+                if (aClip && !usedAudioIds.has(aClip.id)) {
+                    newClips.push(aClip);
+                    usedAudioIds.add(aClip.id);
+                    continue;
+                }
+            }
+            newClips.push({
+                id: `gap_${vClip.id}_${Date.now()}`,
+                track_type: "audio",
+                track_index: 0,
+                file_path: null,
+                file_name: "(gap)",
+                duration: vDur,
+                trim_start: 0,
+                trim_end: vDur,
+                is_gap: true,
+                linked_id: null,
+                transition_in: "cut",
+                transition_out: "cut",
+                transition_duration: 0,
+            });
+        }
+
+        for (const aClip of allAudioClips) {
+            if (!usedAudioIds.has(aClip.id)) {
+                newClips.push(aClip);
+            }
+        }
+
+        this.td.clips = newClips;
+        this.selectedIndex = -1;
+        this.boxSelected.clear();
     }
 
     _renderFooter() {
@@ -3542,6 +3642,7 @@ class TimelineEditor {
                         const ok = await this._addClipFromFile(file);
                         if (ok) added++;
                     }
+                    this._autoLinkClips();
                     this._save();
                     this._renderAll();
                     const skipped = newFiles.length - added;
