@@ -192,7 +192,7 @@ const STYLES = `
     justify-content: center; overflow: hidden; position: relative; min-height: 30px;
 }
 .bsai-pp-clip-block.video-clip .bsai-pp-clip-thumb { min-height: 50px; flex: 1 1 auto; }
-.bsai-pp-clip-thumb img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.bsai-pp-clip-thumb img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; background: #000; }
 .bsai-pp-clip-thumb .placeholder { color: #555; font-size: 14px; }
 .bsai-pp-clip-waveform { width: 100%; height: 100%; object-fit: cover; background: #1a2a1a; }
 .bsai-pp-clip-waveform-canvas { width: 100%; height: 100%; display: block; background: #1a2a1a; }
