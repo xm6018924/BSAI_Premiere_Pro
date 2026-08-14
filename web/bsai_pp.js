@@ -92,6 +92,7 @@ const STYLES = `
 .bsai-pp-timeline-section {
     flex: 1; display: flex; flex-direction: column; overflow: hidden;
     border-bottom: 1px solid #3a3a3a;
+    min-height: 0;
 }
 .bsai-pp-section-label {
     padding: 6px 16px; color: #888; font-size: 11px; text-transform: uppercase;
@@ -119,9 +120,10 @@ const STYLES = `
     display: flex; align-items: center; gap: 8px;
 }
 .bsai-pp-track-row {
-    display: flex; border-bottom: 1px solid #111; min-height: 64px;
+    display: flex; border-bottom: 1px solid #111; min-height: 50px; flex-shrink: 0;
 }
-.bsai-pp-track-row.video-track { min-height: 160px; }
+.bsai-pp-track-row.video-track { min-height: 120px; }
+.bsai-pp-track-row.audio-track { min-height: 50px; }
 .bsai-pp-track-header {
     min-width: 150px; flex-shrink: 0; background: #2a2a2a;
     border-right: 1px solid #3a3a3a; display: flex; flex-direction: column;
@@ -142,9 +144,9 @@ const STYLES = `
 .bsai-pp-track-btn.danger:hover { background: #d35454; color: #fff; }
 .bsai-pp-track-content {
     flex: 1; background: #1a1a1a; display: flex; align-items: stretch;
-    gap: 0; padding: 4px 4px; overflow-x: visible; position: relative; min-height: 56px;
+    gap: 0; padding: 4px 4px; overflow-x: visible; position: relative; min-height: 42px;
 }
-.bsai-pp-track-row.video-track .bsai-pp-track-content { min-height: 152px; }
+.bsai-pp-track-row.video-track .bsai-pp-track-content { min-height: 112px; }
 .bsai-pp-track-empty { color: #444; font-size: 11px; padding: 0 12px; }
 .bsai-pp-clip-block {
     border: 1px solid #3a3a3a; border-radius: 4px; height: 52px; cursor: pointer;
@@ -175,7 +177,7 @@ const STYLES = `
     flex: 1; background: #111; display: flex; align-items: center;
     justify-content: center; overflow: hidden; position: relative; min-height: 30px;
 }
-.bsai-pp-clip-block.video-clip .bsai-pp-clip-thumb { min-height: 110px; flex: 1 1 auto; }
+.bsai-pp-clip-block.video-clip .bsai-pp-clip-thumb { min-height: 70px; flex: 1 1 auto; }
 .bsai-pp-clip-thumb img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 .bsai-pp-clip-thumb .placeholder { color: #555; font-size: 14px; }
 .bsai-pp-clip-waveform { width: 100%; height: 100%; object-fit: cover; background: #1a2a1a; }
@@ -244,7 +246,7 @@ const STYLES = `
     width: 100%;
 }
 .bsai-pp-edit-section {
-    height: 260px; flex-shrink: 0; overflow-y: auto;
+    height: 200px; flex-shrink: 0; overflow-y: auto;
     background: #222; display: flex; flex-direction: column;
 }
 .bsai-pp-edit-content { padding: 12px 16px; }
@@ -997,6 +999,8 @@ class TimelineEditor {
         this._playClipIndex = 0;
         this._pausedClip = null;
         this._pausedVideoTime = null;
+        this._previewVideoActive = false;
+        this._startClipIndex = 0;
         this.td = this._load();
     }
 
@@ -1272,6 +1276,19 @@ class TimelineEditor {
         this.modal.querySelector('[data-act="close-preview"]').onclick = (e) => {
             e.stopPropagation();
             this._stopPlayback();
+            const overlay = this.modal.querySelector("[data-timeline-preview]");
+            if (overlay) {
+                overlay.classList.remove("visible", "fullscreen");
+                const enlargeBtn = this.modal.querySelector('[data-act="enlarge-preview"]');
+                if (enlargeBtn) enlargeBtn.textContent = "⛶";
+            }
+            const video = this.modal.querySelector("[data-preview-video]");
+            if (video) {
+                video.pause();
+                video.ontimeupdate = null;
+                video.onended = null;
+            }
+            this._previewVideoActive = false;
         };
         this.modal.querySelector('[data-act="enlarge-preview"]').onclick = (e) => {
             e.stopPropagation();
@@ -1328,7 +1345,19 @@ class TimelineEditor {
                 const tag = e.target?.tagName?.toLowerCase();
                 if (tag === "input" || tag === "textarea" || tag === "select") return;
                 e.preventDefault();
-                this._togglePlayback();
+                // If preview video is active (after render), spacebar controls preview
+                if (this._previewVideoActive) {
+                    const previewVideo = this.modal.querySelector("[data-preview-video]");
+                    if (previewVideo) {
+                        if (previewVideo.paused) {
+                            previewVideo.play().catch(() => {});
+                        } else {
+                            previewVideo.pause();
+                        }
+                    }
+                } else {
+                    this._togglePlayback();
+                }
             }
             if (e.key === "Escape") this.close();
         };
@@ -1923,9 +1952,18 @@ class TimelineEditor {
                 return;
             }
         }
-        // Fresh start: play from first video clip
+        // Fresh start: play from selected video clip, or first if none selected
         this._playClips = videoClips;
-        this._playClipIndex = 0;
+        // Find the index of the currently selected clip in the videoClips array
+        let startIdx = 0;
+        if (this.selectedIndex >= 0 && this.td.clips[this.selectedIndex]) {
+            const selectedClip = this.td.clips[this.selectedIndex];
+            if (selectedClip.track_type === "video" && selectedClip.video_enabled !== false) {
+                const foundIdx = videoClips.indexOf(selectedClip);
+                if (foundIdx >= 0) startIdx = foundIdx;
+            }
+        }
+        this._playClipIndex = startIdx;
         this._isPlaying = true;
         this._pausedClip = null;
         this._pausedVideoTime = null;
@@ -2062,9 +2100,11 @@ class TimelineEditor {
         this.modal.querySelectorAll(".bsai-pp-inline-video").forEach(v => { v.pause(); v.remove(); });
         // Remove playhead
         this._removePlayhead();
-        // Hide overlay if it was shown via enlarge
-        this.modal.querySelector("[data-timeline-preview]")?.classList.remove("visible");
-        this.modal.querySelector("[data-timeline-preview]")?.classList.remove("fullscreen");
+        // Only hide timeline preview overlay if it was used for inline playback (not render preview)
+        if (!this._previewVideoActive) {
+            this.modal.querySelector("[data-timeline-preview]")?.classList.remove("visible");
+            this.modal.querySelector("[data-timeline-preview]")?.classList.remove("fullscreen");
+        }
         const btn = this.modal.querySelector("#bsai-pp-play-btn");
         if (btn) btn.textContent = "▶️ 播放";
         const footerInfo = this.modal.querySelector("[data-footer-info]");
@@ -3485,9 +3525,28 @@ class TimelineEditor {
         if (overlay && video) {
             video.src = `/view?filename=${encodeURIComponent(filename)}&type=output`;
             overlay.classList.add("visible");
+            // Default to fullscreen playback
+            overlay.classList.add("fullscreen");
+            const enlargeBtn = this.modal.querySelector('[data-act="enlarge-preview"]');
+            if (enlargeBtn) enlargeBtn.textContent = "🗗";
             const infoEl = this.modal.querySelector("[data-preview-info]");
             if (infoEl) infoEl.textContent = `🎞️ 渲染结果: ${filename}`;
+            // Stop any timeline playback first
+            this._stopPlayback();
+            // Track that preview video is active so spacebar controls it
+            this._previewVideoActive = true;
             video.play().catch(() => {});
+            // Add timeupdate for progress bar
+            video.ontimeupdate = () => {
+                const prog = this.modal.querySelector("[data-preview-progress]");
+                if (prog && video.duration > 0) {
+                    prog.style.width = (video.currentTime / video.duration * 100) + "%";
+                }
+            };
+            video.onended = () => {
+                const prog = this.modal.querySelector("[data-preview-progress]");
+                if (prog) prog.style.width = "0%";
+            };
         }
     }
 
