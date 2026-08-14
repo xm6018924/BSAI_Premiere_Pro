@@ -2551,20 +2551,30 @@ class TimelineEditor {
                 imgStartOffset = Math.max(0, this._playStartOffset - trimStart);
                 this._playStartOffset = null;
             }
-            const remainingDur = Math.max(0.1, clipDur - imgStartOffset) * 1000;
 
             const imgStartTime = performance.now();
             const clipStartOffset = imgStartOffset;
+            let imgAdvanced = false;
+
+            const advanceFromImg = () => {
+                if (imgAdvanced) return;
+                imgAdvanced = true;
+                clearTimeout(imgTimeout);
+                img.remove();
+                this._playClipIndex++;
+                this._playNextClip();
+            };
+
+            // Fallback timeout: ensure playback continues even if requestAnimationFrame fails
+            const imgTimeout = setTimeout(advanceFromImg, Math.max(0.5, clipDur - imgStartOffset + 0.2) * 1000);
 
             // Animate playhead across the image clip
             const animateImg = () => {
-                if (!this._isPlaying) return;
+                if (!this._isPlaying || imgAdvanced) return;
                 const elapsed = (performance.now() - imgStartTime) / 1000 + clipStartOffset;
                 this._imageElapsed = elapsed;
                 if (elapsed >= clipDur) {
-                    img.remove();
-                    this._playClipIndex++;
-                    this._playNextClip();
+                    advanceFromImg();
                     return;
                 }
                 // Animate playhead
@@ -2646,6 +2656,7 @@ class TimelineEditor {
         const advanceToNext = () => {
             if (clipEnded) return;
             clipEnded = true;
+            clearTimeout(videoFallback);
             video.onended = null;
             video.ontimeupdate = null;
             video.onloadedmetadata = null;
@@ -2655,6 +2666,14 @@ class TimelineEditor {
             this._playClipIndex++;
             this._playNextClip();
         };
+
+        // Fallback: if video doesn't end within clipDur + 5s, force-advance
+        const videoFallback = setTimeout(() => {
+            if (!clipEnded) {
+                console.warn("[BSAI PP] Video fallback timeout triggered for:", clip.file_name);
+                advanceToNext();
+            }
+        }, Math.max(5, clipDur + 5) * 1000);
 
         video.onloadedmetadata = () => {
             const seekTo = this._playStartOffset != null ? this._playStartOffset : trimStart;
