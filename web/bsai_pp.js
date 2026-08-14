@@ -260,7 +260,7 @@ const STYLES = `
     width: 100%;
 }
 .bsai-pp-edit-section {
-    height: 180px; flex-shrink: 0; overflow-y: auto;
+    height: 260px; flex-shrink: 0; overflow-y: auto;
     background: #222; display: flex; flex-direction: column;
 }
 .bsai-pp-edit-content { padding: 12px 16px; }
@@ -1340,9 +1340,9 @@ class TimelineEditor {
                 let newTimelineH = divTimelineStartH + delta;
                 let newEditH = divEditStartH - delta;
 
-                // Enforce minimums: timeline >= 120px, edit >= 80px
+                // Enforce minimums: timeline >= 120px, edit >= 200px
                 const MIN_TIMELINE = 120;
-                const MIN_EDIT = 80;
+                const MIN_EDIT = 200;
                 if (newTimelineH < MIN_TIMELINE) {
                     newTimelineH = MIN_TIMELINE;
                     newEditH = bodyH - MIN_TIMELINE - 6; // 6px divider
@@ -1378,7 +1378,7 @@ class TimelineEditor {
                     timelineEl.style.flex = "1";
                     timelineEl.style.height = "";
                     editEl.style.flex = "";
-                    editEl.style.height = "180px";
+                    editEl.style.height = "260px";
                 }
             });
 
@@ -1624,7 +1624,7 @@ class TimelineEditor {
 
     _adjustZoom(factor) {
         const old = this._zoomLevel || 1;
-        this._zoomLevel = Math.max(0.2, Math.min(8, old * factor));
+        this._zoomLevel = Math.max(0.2, Math.min(20, old * factor));
         if (Math.abs(this._zoomLevel - old) < 0.01) return;
         const display = this.modal.querySelector("[data-zoom-display]");
         if (display) display.textContent = Math.round(this._zoomLevel * 100) + "%";
@@ -1637,12 +1637,12 @@ class TimelineEditor {
         // Base heights at zoom=1
         const baseVideoH = 90;
         const baseAudioH = 40;
-        // Scale video height with zoom, audio slightly
-        let videoH = Math.round(baseVideoH * Math.sqrt(zoom));
-        let audioH = Math.round(baseAudioH * Math.max(1, Math.sqrt(zoom) * 0.7));
-        // Cap at reasonable maximums
-        videoH = Math.min(videoH, 500);
-        audioH = Math.min(audioH, 120);
+        // Scale video height with zoom linearly for bigger growth
+        let videoH = Math.round(baseVideoH * zoom);
+        let audioH = Math.round(baseAudioH * Math.max(1, zoom * 0.6));
+        // Cap at generous maximums
+        videoH = Math.min(videoH, 1000);
+        audioH = Math.min(audioH, 300);
         return { videoH, audioH };
     }
 
@@ -2524,6 +2524,35 @@ class TimelineEditor {
         block.className = "bsai-pp-clip-block";
         block.setAttribute("data-clip-idx", clipIndex);
         const isVideo = clip.track_type === "video";
+
+        // ── Gap clip: render as empty placeholder ──
+        if (clip.is_gap) {
+            block.classList.add("gap-clip");
+            const clipDur = clip.trim_end || clip.duration || 0;
+            const pps = this._pps || 15;
+            const width = Math.max(60, Math.round(clipDur * pps));
+            block.style.width = width + "px";
+            block.innerHTML = `
+                <div class="bsai-pp-clip-thumb" style="background:#1a1a1a;border:2px dashed #444;display:flex;align-items:center;justify-content:center;">
+                    <span class="placeholder" style="color:#444;font-size:11px;">⬚ 空位</span>
+                </div>
+                <div class="bsai-pp-clip-info">
+                    <div class="bsai-pp-clip-name" style="color:#555;">(已删除)</div>
+                    <div class="bsai-pp-clip-dur" style="color:#444;">${formatTime(clipDur)}</div>
+                </div>`;
+            // Allow clicking gap to remove it (fill gap)
+            block.onclick = (e) => {
+                e.stopPropagation();
+                if (confirm("移除此空位？后续片段会前移填充。")) {
+                    this.td.clips = this.td.clips.filter((c, i) => i !== clipIndex);
+                    if (this.selectedIndex >= this.td.clips.length) this.selectedIndex = -1;
+                    this._save();
+                    this._renderAll();
+                }
+            };
+            return block;
+        }
+
         const isLocked = this._isTrackLocked(clip);
         block.classList.add(isVideo ? "video-clip" : "audio-clip");
         if (clip.linked_id) block.classList.add("linked");
@@ -3054,6 +3083,10 @@ class TimelineEditor {
             return;
         }
         const clip = this.td.clips[this.selectedIndex];
+        if (clip.is_gap) {
+            panel.innerHTML = `<div class="bsai-pp-no-selection">此位置是空位（已删除的片段）<br>点击空位块可选择移除它</div>`;
+            return;
+        }
         const isVideo = clip.track_type === "video";
         const dur = clip.duration || 0;
         const trimStart = clip.trim_start || 0;
@@ -3562,7 +3595,7 @@ class TimelineEditor {
             this._toast("该轨道已锁定，无法删除片段", "error");
             return;
         }
-        // If linked, also delete the linked partner
+        // If linked, also delete the linked partner (both removed)
         const idsToDelete = new Set([clip.id]);
         if (clip.linked_id) {
             idsToDelete.add(clip.linked_id);
@@ -3574,8 +3607,36 @@ class TimelineEditor {
         if (!this.td.deleted_files.includes(clip.file_name)) {
             this.td.deleted_files.push(clip.file_name);
         }
-        this.td.clips = this.td.clips.filter(c => !idsToDelete.has(c.id));
+        // Replace deleted clips with gap placeholders (preserve timeline positions)
+        const gapClips = [];
+        for (const c of this.td.clips) {
+            if (idsToDelete.has(c.id)) {
+                // Create a gap clip to preserve the position
+                gapClips.push({
+                    id: c.id + "_gap",
+                    track_type: c.track_type,
+                    track_index: c.track_index,
+                    file_path: null,
+                    file_name: "(gap)",
+                    duration: c.duration || 0,
+                    trim_start: 0,
+                    trim_end: c.duration || 0,
+                    is_gap: true,
+                    linked_id: null,
+                    transition_in: "cut",
+                    transition_out: "cut",
+                    transition_duration: 0,
+                });
+            } else {
+                gapClips.push(c);
+            }
+        }
+        this.td.clips = gapClips;
         if (this.selectedIndex >= this.td.clips.length) this.selectedIndex = this.td.clips.length - 1;
+        // If selected clip is now a gap, deselect
+        if (this.selectedIndex >= 0 && this.td.clips[this.selectedIndex]?.is_gap) {
+            this.selectedIndex = -1;
+        }
         this._save();
         this._renderAll();
     }

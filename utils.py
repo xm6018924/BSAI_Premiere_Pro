@@ -547,8 +547,8 @@ def _process_track_clips(clips, track_type, track_index, temp_dir, target_w, tar
     if not ffmpeg or not clips:
         return None
 
-    # Filter clips whose source file exists
-    valid_clips = [c for c in clips if os.path.exists(c.get("file_path", ""))]
+    # Filter clips whose source file exists (also excludes gap placeholders)
+    valid_clips = [c for c in clips if c.get("file_path") and os.path.exists(c["file_path"])]
     if not valid_clips:
         return None
 
@@ -754,6 +754,9 @@ def process_and_merge(timeline_data, output_filename, format_str, pix_fmt,
 
     is_multitrack = any("track_type" in c for c in clips)
     align_mode = timeline_data.get("align_mode", "height")
+
+    # Filter out gap clips (deleted clips that left a placeholder)
+    clips = [c for c in clips if not c.get("is_gap", False)]
 
     if is_multitrack:
         enabled_clips = []
