@@ -2271,6 +2271,9 @@ class TimelineEditor {
 
         // Restore playback from saved position (not from beginning)
         if (wasPlaying) {
+            // Remove timeline playhead to avoid dual playheads during playback
+            const tlPh = this.modal.querySelector(".bsai-pp-timeline-playhead");
+            if (tlPh) tlPh.remove();
             this._playClips = (this.td.clips || []).filter(c => c.track_type === "video" && c.video_enabled !== false);
             this._playClipIndex = Math.min(savedClipIndex, this._playClips.length - 1);
             this._playStartOffset = savedOffset;
