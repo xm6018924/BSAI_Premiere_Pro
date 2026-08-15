@@ -4239,7 +4239,7 @@ class TimelineEditor {
         document.querySelectorAll(".bsai-pp-transition-popup").forEach(p => p.remove());
         const clip = this.td.clips[clipIndex];
         if (!clip) return;
-        const currentTrans = clip.transition_in || "fade";
+        const currentTrans = clip.transition_in || "cut";
         const popup = document.createElement("div");
         popup.className = "bsai-pp-transition-popup";
         popup.innerHTML = `
@@ -4384,7 +4384,7 @@ class TimelineEditor {
             const totalDur = videoClips.reduce((s, c) => s + (c.trim_end - c.trim_start), 0);
             const outputName = this._getWidgetValue("output_filename", "premiere_pro_output");
             const frameRate = this._getWidgetValue("frame_rate", 24);
-            const defaultTrans = this._getWidgetValue("default_transition", "fade");
+            const defaultTrans = this._getWidgetValue("default_transition", "cut");
             const transDur = this._getWidgetValue("transition_duration", 0.5);
             panel.innerHTML = `
                 <div class="bsai-pp-edit-row">
@@ -4456,8 +4456,8 @@ class TimelineEditor {
         const dur = clip.duration || 0;
         const trimStart = clip.trim_start || 0;
         const trimEnd = clip.trim_end || dur;
-        const transIn = clip.transition_in || "fade";
-        const transOut = clip.transition_out || "fade";
+        const transIn = clip.transition_in || "cut";
+        const transOut = clip.transition_out || "cut";
         const transDur = clip.transition_duration ?? 0.5;
         const audioRep = clip.audio_replacement || "";
         const aFadeIn = clip.audio_fade_in || 0;
@@ -4890,7 +4890,7 @@ class TimelineEditor {
                 width: meta.width || (treatAsAudioOnly ? 0 : 1080), height: meta.height || (treatAsAudioOnly ? 0 : 1920), fps: meta.fps || 30,
                 has_audio: hasAudio,
                 trim_start: 0, trim_end: duration,
-                transition_in: "fade", transition_out: "fade",
+                transition_in: "cut", transition_out: "cut",
                 transition_duration: parseFloat(this._getWidgetValue("transition_duration", 0.5)),
                 audio_replacement: null, audio_fade_in: 0, audio_fade_out: 0,
                 video_enabled: true, audio_enabled: true,
@@ -5346,7 +5346,7 @@ class TimelineEditor {
                 pix_fmt: this._getWidgetValue("pix_fmt", "yuv420p"),
                 crf: parseFloat(this._getWidgetValue("crf", 19)),
                 frame_rate: parseFloat(this._getWidgetValue("frame_rate", 24)),
-                default_transition: this._getWidgetValue("default_transition", "fade"),
+                default_transition: this._getWidgetValue("default_transition", "cut"),
                 transition_duration: parseFloat(this._getWidgetValue("transition_duration", 0.5)),
             };
             this._updateProgress(30, "合并视频片段...");
@@ -5674,7 +5674,7 @@ function _registerBsaiPP() {
                                         width: fi.width || (isAudioOnly ? 0 : 1080), height: fi.height || (isAudioOnly ? 0 : 1920),
                                         fps: fi.fps || 30, has_audio: hasAud,
                                         trim_start: 0, trim_end: dur,
-                                        transition_in: "fade", transition_out: "fade",
+                                        transition_in: "cut", transition_out: "cut",
                                         transition_duration: 0.5, audio_replacement: null,
                                         audio_fade_in: 0, audio_fade_out: 0,
                                         video_enabled: true, audio_enabled: true,
