@@ -587,12 +587,46 @@ def _build_clip_command(clip, output_file, target_w, target_h, target_fps,
     return cmd
 
 
+def _generate_gap_filler(ffmpeg, output_file, duration, target_w, target_h, target_fps, track_type):
+    """Generate a black video (and silent audio for audio tracks) filler segment."""
+    duration = max(0.1, min(duration, 3600))
+    if track_type == "video":
+        cmd = [
+            ffmpeg, "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", f"color=black:s={target_w}x{target_h}:r={target_fps}:d={duration}",
+            "-t", str(duration),
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+            "-r", str(target_fps), "-pix_fmt", "yuv420p",
+            "-an",
+            output_file
+        ]
+    else:
+        cmd = [
+            ffmpeg, "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", f"color=black:s={target_w}x{target_h}:r={target_fps}:d={duration}",
+            "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+            "-t", str(duration),
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+            "-c:a", "aac", "-b:a", "192k",
+            "-r", str(target_fps), "-pix_fmt", "yuv420p",
+            "-ar", "48000", "-ac", "2",
+            "-shortest",
+            output_file
+        ]
+    result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=120)
+    if result.returncode != 0:
+        print(f"[BSAI Premiere Pro] Failed to generate gap filler:\n{result.stderr}")
+        return False
+    return os.path.exists(output_file)
+
+
 def _process_track_clips(clips, track_type, track_index, temp_dir, target_w, target_h, target_fps,
                          default_transition, transition_duration, align_mode="height"):
     """Process all clips in a single track and concatenate them.
 
     Returns the path to the merged track file, or None on failure.
     Uses track-local clip indices for fade/transition logic.
+    Inserts black filler segments for timeline gaps to preserve sync.
     """
     ffmpeg = get_ffmpeg()
     if not ffmpeg or not clips:
@@ -603,13 +637,30 @@ def _process_track_clips(clips, track_type, track_index, temp_dir, target_w, tar
     if not valid_clips:
         return None
 
+    # Sort by start_time to ensure correct timeline order
+    valid_clips.sort(key=lambda c: c.get("start_time", 0))
+
     track_temp_dir = os.path.join(temp_dir, f"track_{track_type}_{track_index}")
     os.makedirs(track_temp_dir, exist_ok=True)
 
     processed_files = []
+    expected_end = 0.0  # Track the expected end time on the timeline
     total_clips = len(valid_clips)
     for i, clip in enumerate(valid_clips):
-        output_file = os.path.join(track_temp_dir, f"clip_{i:04d}.mp4")
+        clip_start = float(clip.get("start_time", 0))
+        trim_start = float(clip.get("trim_start", 0))
+        trim_end = float(clip.get("trim_end", clip.get("duration", 0)))
+        clip_dur = trim_end - trim_start
+
+        # Insert black filler for timeline gap before this clip
+        gap = clip_start - expected_end
+        if gap > 0.1:
+            gap_file = os.path.join(track_temp_dir, f"gap_{len(processed_files):04d}.mp4")
+            if _generate_gap_filler(ffmpeg, gap_file, gap, target_w, target_h, target_fps, track_type):
+                processed_files.append(gap_file)
+                print(f"[BSAI Premiere Pro] Inserted {gap:.2f}s gap filler for {track_type} track {track_index}")
+
+        output_file = os.path.join(track_temp_dir, f"clip_{len(processed_files):04d}.mp4")
         cmd = _build_clip_command(
             clip, output_file, target_w, target_h, target_fps,
             default_transition, transition_duration, i, total_clips, align_mode
@@ -623,6 +674,7 @@ def _process_track_clips(clips, track_type, track_index, temp_dir, target_w, tar
             print(f"[BSAI Premiere Pro] Failed to process clip {i} in {track_type} track {track_index}:\n{result.stderr}")
             continue
         processed_files.append(output_file)
+        expected_end = max(expected_end, clip_start) + clip_dur
 
     if not processed_files:
         return None
@@ -1041,19 +1093,40 @@ def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
 
     # --- Combine final video and audio into output ---
     if final_video and final_audio:
-        combine_cmd = [
-            ffmpeg, "-y", "-loglevel", "error",
-            "-i", final_video, "-i", final_audio,
-            "-filter_complex", "[1:a]apad[aout]",
-            "-map", "0:v:0", "-map", "[aout]",
-            "-c:v", video_codec, "-preset", "medium", "-crf", crf,
-            "-c:a", "aac", "-b:a", "192k",
-            "-pix_fmt", pix_fmt,
-            "-movflags", "+faststart",
-            "-shortest",
-            output_path
-        ]
-        print(f"[BSAI Premiere Pro] Combining video and audio (apad) -> {output_path}")
+        v_info = get_video_info(final_video)
+        a_info = get_video_info(final_audio)
+        v_dur = v_info["duration"] if v_info else 0
+        a_dur = a_info["duration"] if a_info else 0
+        if a_dur > v_dur + 0.5:
+            trailing = a_dur - v_dur
+            combine_cmd = [
+                ffmpeg, "-y", "-loglevel", "error",
+                "-i", final_video, "-i", final_audio,
+                "-filter_complex",
+                f"[0:v]tpad=stop_mode=on:stop_duration={trailing}[vout]; [1:a]apad[aout]",
+                "-map", "[vout]", "-map", "[aout]",
+                "-c:v", video_codec, "-preset", "medium", "-crf", crf,
+                "-c:a", "aac", "-b:a", "192k",
+                "-pix_fmt", pix_fmt,
+                "-movflags", "+faststart",
+                "-shortest",
+                output_path
+            ]
+            print(f"[BSAI Premiere Pro] Combining video and audio (tpad {trailing:.2f}s + apad) -> {output_path}")
+        else:
+            combine_cmd = [
+                ffmpeg, "-y", "-loglevel", "error",
+                "-i", final_video, "-i", final_audio,
+                "-filter_complex", "[1:a]apad[aout]",
+                "-map", "0:v:0", "-map", "[aout]",
+                "-c:v", video_codec, "-preset", "medium", "-crf", crf,
+                "-c:a", "aac", "-b:a", "192k",
+                "-pix_fmt", pix_fmt,
+                "-movflags", "+faststart",
+                "-shortest",
+                output_path
+            ]
+            print(f"[BSAI Premiere Pro] Combining video and audio (apad) -> {output_path}")
         result = subprocess.run(combine_cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
         if result.returncode != 0:
             return None, f"Failed to combine video and audio:\n{result.stderr}"

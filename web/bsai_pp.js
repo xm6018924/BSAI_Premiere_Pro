@@ -2038,7 +2038,7 @@ class TimelineEditor {
             // Home: jump to first frame
             if (e.key === "Home") {
                 e.preventDefault();
-                if (this._isPlaying) this._stopPlayback();
+                this._stopPlayback();
                 this._playheadTime = 0;
                 this._renderTimelinePlayhead();
                 this._scrollToPlayhead();
@@ -2046,7 +2046,7 @@ class TimelineEditor {
             // End: jump to last frame
             if (e.key === "End") {
                 e.preventDefault();
-                if (this._isPlaying) this._stopPlayback();
+                this._stopPlayback();
                 const vClips = this.td.clips.filter(c => c.track_type === "video");
                 if (vClips.length > 0) {
                     let totalDur = 0;
@@ -2059,7 +2059,7 @@ class TimelineEditor {
             // Arrow left: go back 1 frame
             if (e.key === "ArrowLeft") {
                 e.preventDefault();
-                if (this._isPlaying) this._stopPlayback();
+                this._stopPlayback();
                 const fps = this._getCurrentFps();
                 if (this._playheadTime === null) this._playheadTime = 0;
                 this._playheadTime = Math.max(0, this._playheadTime - 1 / fps);
@@ -2069,7 +2069,7 @@ class TimelineEditor {
             // Arrow right: go forward 1 frame
             if (e.key === "ArrowRight") {
                 e.preventDefault();
-                if (this._isPlaying) this._stopPlayback();
+                this._stopPlayback();
                 const fps = this._getCurrentFps();
                 if (this._playheadTime === null) this._playheadTime = 0;
                 const vClips = this.td.clips.filter(c => c.track_type === "video");
@@ -2896,6 +2896,9 @@ class TimelineEditor {
             this._toast("时间轴上没有可播放的视频片段", "error");
             return;
         }
+        // Remove timeline playhead to avoid dual playheads during playback
+        const tlPh = this.modal.querySelector(".bsai-pp-timeline-playhead");
+        if (tlPh) tlPh.remove();
         // If resuming from pause (inline video element still exists), just resume
         if (!this._isPlaying && this._playClips.length > 0) {
             const inlineVideo = this.modal.querySelector(".bsai-pp-inline-video");
@@ -2975,9 +2978,10 @@ class TimelineEditor {
         // Safety: ensure minimum 0.1s duration to prevent instant-skip playback issues
         if (trimEnd <= trimStart) { clip.trim_end = trimStart + (clip.duration || 3); }
 
-        // Remove any previous inline video/image
+        // Remove any previous inline video/image/audio
         this.modal.querySelectorAll(".bsai-pp-inline-video").forEach(v => { v.pause?.(); v.remove(); });
         this.modal.querySelectorAll(".bsai-pp-inline-image").forEach(v => { v.remove(); });
+        this.modal.querySelectorAll(".bsai-pp-inline-audio").forEach(v => { v.pause?.(); v.remove(); });
 
         // Find the clip block element on the timeline
         const clipIdx = this.td.clips.indexOf(clip);
@@ -3093,6 +3097,7 @@ class TimelineEditor {
                     shouldMuteVideo = true;
                     separateAudioEl = document.createElement("audio");
                     separateAudioEl.className = "bsai-pp-inline-audio";
+                    separateAudioEl.preload = "auto";
                     separateAudioEl.src = `/bsai_premiere_pro/stream?file=${encodeURIComponent(linkedAudio.file_path)}`;
                     separateAudioEl.style.display = "none";
                 }
@@ -3121,6 +3126,7 @@ class TimelineEditor {
                     shouldMuteVideo = true;
                     separateAudioEl = document.createElement("audio");
                     separateAudioEl.className = "bsai-pp-inline-audio";
+                    separateAudioEl.preload = "auto";
                     separateAudioEl.src = `/bsai_premiere_pro/stream?file=${encodeURIComponent(aClip.file_path)}`;
                     separateAudioEl.style.display = "none";
                     audioSeekOffset = vStart - aStart; // align audio seek with timeline position
@@ -3133,6 +3139,16 @@ class TimelineEditor {
             }
         }
         video.muted = shouldMuteVideo;
+
+        // Ensure audio plays even if initial play() failed (e.g. not yet loaded)
+        if (separateAudioEl) {
+            separateAudioEl.addEventListener("canplay", () => {
+                if (gen !== this._playbackGen || !this._isPlaying) return;
+                if (separateAudioEl.paused) {
+                    separateAudioEl.play().catch(() => {});
+                }
+            });
+        }
 
         thumbDiv.appendChild(video);
         if (separateAudioEl) thumbDiv.appendChild(separateAudioEl);
