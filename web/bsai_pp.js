@@ -3026,21 +3026,77 @@ class TimelineEditor {
 
         // ── Image clip: display as <img> for its timeline duration ──
         if (clip.is_image) {
+            // Calculate remaining duration if resuming from playhead offset
+            let imgStartOffset = 0;
+            if (this._playStartOffset != null) {
+                imgStartOffset = Math.max(0, this._playStartOffset - trimStart);
+                this._playStartOffset = null;
+            }
+
             const img = document.createElement("img");
             img.className = "bsai-pp-inline-image bsai-pp-inline-video";
             img.style.cssText = "width:100%;height:100%;object-fit:contain;position:absolute;top:0;left:0;background:#000;z-index:5;";
             img.src = `/bsai_premiere_pro/stream?file=${encodeURIComponent(filePath)}`;
             thumbDiv.appendChild(img);
 
-            if (clipBlock) {
-                clipBlock.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+            // Audio playback for image clips: find overlapping or linked audio
+            let imgAudioEl = null;
+            const vStart = this._getClipStartTime(clip);
+            const vEnd = vStart + clipDur;
+            if (clip.linked_id) {
+                const linkedAudio = this.td.clips.find(c => c.id === clip.linked_id);
+                if (linkedAudio && !linkedAudio.is_gap && linkedAudio.file_path && linkedAudio.audio_enabled !== false) {
+                    const audioTracks = this.td.audio_tracks || [];
+                    const aTrack = linkedAudio.track_index != null ? audioTracks[linkedAudio.track_index] : null;
+                    if (!(aTrack && aTrack.muted)) {
+                        imgAudioEl = document.createElement("audio");
+                        imgAudioEl.className = "bsai-pp-inline-audio";
+                        imgAudioEl.preload = "auto";
+                        imgAudioEl.src = `/bsai_premiere_pro/stream?file=${encodeURIComponent(linkedAudio.file_path)}`;
+                        imgAudioEl.style.display = "none";
+                        if (imgStartOffset > 0) {
+                            imgAudioEl.addEventListener("loadedmetadata", () => {
+                                if (gen !== this._playbackGen) return;
+                                try { imgAudioEl.currentTime = Math.max(0, imgStartOffset); } catch {}
+                            }, { once: true });
+                        }
+                    }
+                }
+            } else {
+                const audioClips = this.td.clips.filter(c => c.track_type === "audio" && c.file_path && c.audio_enabled !== false);
+                for (const aClip of audioClips) {
+                    const aStart = this._getClipStartTime(aClip);
+                    const aDur = (aClip.trim_end || 0) - (aClip.trim_start || 0);
+                    const aEnd = aStart + aDur;
+                    if (vStart < aEnd && vEnd > aStart) {
+                        imgAudioEl = document.createElement("audio");
+                        imgAudioEl.className = "bsai-pp-inline-audio";
+                        imgAudioEl.preload = "auto";
+                        imgAudioEl.src = `/bsai_premiere_pro/stream?file=${encodeURIComponent(aClip.file_path)}`;
+                        imgAudioEl.style.display = "none";
+                        const audioSeekOffset = vStart - aStart;
+                        const seekTo = imgStartOffset + audioSeekOffset;
+                        if (seekTo > 0) {
+                            imgAudioEl.addEventListener("loadedmetadata", () => {
+                                if (gen !== this._playbackGen) return;
+                                try { imgAudioEl.currentTime = Math.max(0, seekTo); } catch {}
+                            }, { once: true });
+                        }
+                        break;
+                    }
+                }
+            }
+            if (imgAudioEl) {
+                imgAudioEl.addEventListener("canplay", () => {
+                    if (gen !== this._playbackGen || !this._isPlaying) return;
+                    if (imgAudioEl.paused) imgAudioEl.play().catch(() => {});
+                });
+                thumbDiv.appendChild(imgAudioEl);
+                imgAudioEl.play().catch(() => {});
             }
 
-            // Calculate remaining duration if resuming from playhead offset
-            let imgStartOffset = 0;
-            if (this._playStartOffset != null) {
-                imgStartOffset = Math.max(0, this._playStartOffset - trimStart);
-                this._playStartOffset = null;
+            if (clipBlock) {
+                clipBlock.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
             }
 
             const imgStartTime = performance.now();
@@ -3052,6 +3108,7 @@ class TimelineEditor {
                 imgAdvanced = true;
                 clearTimeout(imgTimeout);
                 img.remove();
+                if (imgAudioEl) { imgAudioEl.pause(); imgAudioEl.remove(); }
                 this._playClipIndex++;
                 this._playNextClip();
             };
