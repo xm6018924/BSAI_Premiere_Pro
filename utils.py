@@ -415,31 +415,15 @@ def _build_vf_filters(clip, clip_duration, clip_index, total_clips, default_tran
 
 def _build_af_filters(clip, clip_duration, clip_index, total_clips, default_transition, transition_duration):
     filters = []
-    trans_in = clip.get("transition_in", default_transition)
-    trans_out = clip.get("transition_out", default_transition)
-    trans_dur = float(clip.get("transition_duration", transition_duration))
-    if trans_dur <= 0:
-        trans_dur = 0.5
     audio_fade_in = float(clip.get("audio_fade_in", 0))
     audio_fade_out = float(clip.get("audio_fade_out", 0))
 
-    if trans_in != "cut" and clip_index > 0:
-        filters.append(f"afade=t=in:st=0:d={trans_dur}")
-    elif audio_fade_in > 0:
+    # Only apply audio fade when explicitly set by user — seamless by default
+    if audio_fade_in > 0:
         filters.append(f"afade=t=in:st=0:d={audio_fade_in}")
-
-    if trans_out != "cut" and clip_index < total_clips - 1:
-        fade_out_start = max(0, clip_duration - trans_dur)
-        filters.append(f"afade=t=out:st={fade_out_start}:d={trans_dur}")
-    elif audio_fade_out > 0:
+    if audio_fade_out > 0:
         fade_out_start = max(0, clip_duration - audio_fade_out)
         filters.append(f"afade=t=out:st={fade_out_start}:d={audio_fade_out}")
-
-    if clip_index == 0 and trans_in != "cut":
-        filters.append(f"afade=t=in:st=0:d={trans_dur}")
-    if clip_index == total_clips - 1 and trans_out != "cut":
-        fade_out_start = max(0, clip_duration - trans_dur)
-        filters.append(f"afade=t=out:st={fade_out_start}:d={trans_dur}")
 
     return filters
 
