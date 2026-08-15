@@ -1079,8 +1079,24 @@ class AutoImporter {
                 } else if (isImage || !hasAudio) {
                     td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: null, is_video_part: true, is_image: isImage || undefined });
                 } else {
-                    td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: aId, is_video_part: true });
-                    td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: vId, is_video_part: false });
+                    // Video with audio: place at max end of video track OR audio track to keep aligned
+                    let vEnd = 0;
+                    for (const c of (td.clips || [])) {
+                        if (c.track_type !== "video" || c.track_index !== 0) continue;
+                        const cStart = typeof c.start_time === 'number' ? c.start_time : 0;
+                        const end = cStart + ((c.trim_end || c.duration || 0) - (c.trim_start || 0));
+                        if (end > vEnd) vEnd = end;
+                    }
+                    let aEnd = 0;
+                    for (const c of (td.clips || [])) {
+                        if (c.track_type !== "audio" || c.track_index !== 0) continue;
+                        const cStart = typeof c.start_time === 'number' ? c.start_time : 0;
+                        const end = cStart + ((c.trim_end || c.duration || 0) - (c.trim_start || 0));
+                        if (end > aEnd) aEnd = end;
+                    }
+                    const clipStart = Math.max(vEnd, aEnd);
+                    td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: aId, is_video_part: true, start_time: clipStart });
+                    td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: vId, is_video_part: false, start_time: clipStart });
                 }
                 td.known_files.push(file.file_name);
             } catch (e) {
@@ -2022,6 +2038,7 @@ class TimelineEditor {
             // Home: jump to first frame
             if (e.key === "Home") {
                 e.preventDefault();
+                if (this._isPlaying) this._stopPlayback();
                 this._playheadTime = 0;
                 this._renderTimelinePlayhead();
                 this._scrollToPlayhead();
@@ -2029,6 +2046,7 @@ class TimelineEditor {
             // End: jump to last frame
             if (e.key === "End") {
                 e.preventDefault();
+                if (this._isPlaying) this._stopPlayback();
                 const vClips = this.td.clips.filter(c => c.track_type === "video");
                 if (vClips.length > 0) {
                     let totalDur = 0;
@@ -2041,6 +2059,7 @@ class TimelineEditor {
             // Arrow left: go back 1 frame
             if (e.key === "ArrowLeft") {
                 e.preventDefault();
+                if (this._isPlaying) this._stopPlayback();
                 const fps = this._getCurrentFps();
                 if (this._playheadTime === null) this._playheadTime = 0;
                 this._playheadTime = Math.max(0, this._playheadTime - 1 / fps);
@@ -2050,6 +2069,7 @@ class TimelineEditor {
             // Arrow right: go forward 1 frame
             if (e.key === "ArrowRight") {
                 e.preventDefault();
+                if (this._isPlaying) this._stopPlayback();
                 const fps = this._getCurrentFps();
                 if (this._playheadTime === null) this._playheadTime = 0;
                 const vClips = this.td.clips.filter(c => c.track_type === "video");
@@ -4807,13 +4827,21 @@ class TimelineEditor {
                 }
                 this.td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: null, is_video_part: true, is_image: isImage || undefined, start_time: vStartTime });
             } else {
-                // Video with audio: create both linked clips
+                // Video with audio: create both linked clips, placed at max end of video OR audio track
                 const vTrackClips = this._getClipsForTrack("video", 0);
                 let vStartTime = 0;
                 for (const c of vTrackClips) {
                     const end = this._getClipStartTime(c) + ((c.trim_end || c.duration || 0) - (c.trim_start || 0));
                     if (end > vStartTime) vStartTime = end;
                 }
+                // Also check audio track end to avoid overlap with long independent audio
+                const aTrackClips = this._getClipsForTrack("audio", 0);
+                let aTrackEnd = 0;
+                for (const c of aTrackClips) {
+                    const end = this._getClipStartTime(c) + ((c.trim_end || c.duration || 0) - (c.trim_start || 0));
+                    if (end > aTrackEnd) aTrackEnd = end;
+                }
+                vStartTime = Math.max(vStartTime, aTrackEnd);
                 this.td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: aId, is_video_part: true, start_time: vStartTime });
                 this.td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: vId, is_video_part: false, start_time: vStartTime });
             }
@@ -5574,8 +5602,24 @@ function _registerBsaiPP() {
                                     } else if (isImg || !hasAud) {
                                         td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: null, is_video_part: true });
                                     } else {
-                                        td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: aId, is_video_part: true });
-                                        td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: vId, is_video_part: false });
+                                        // Video with audio: place at max end of video OR audio track to keep aligned
+                                        let vEnd2 = 0;
+                                        for (const c of (td.clips || [])) {
+                                            if (c.track_type !== "video" || c.track_index !== 0) continue;
+                                            const cStart = typeof c.start_time === 'number' ? c.start_time : 0;
+                                            const end = cStart + ((c.trim_end || c.duration || 0) - (c.trim_start || 0));
+                                            if (end > vEnd2) vEnd2 = end;
+                                        }
+                                        let aEnd2 = 0;
+                                        for (const c of (td.clips || [])) {
+                                            if (c.track_type !== "audio" || c.track_index !== 0) continue;
+                                            const cStart = typeof c.start_time === 'number' ? c.start_time : 0;
+                                            const end = cStart + ((c.trim_end || c.duration || 0) - (c.trim_start || 0));
+                                            if (end > aEnd2) aEnd2 = end;
+                                        }
+                                        const clipStart2 = Math.max(vEnd2, aEnd2);
+                                        td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: aId, is_video_part: true, start_time: clipStart2 });
+                                        td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: vId, is_video_part: false, start_time: clipStart2 });
                                     }
                                     td.known_files.push(fi.file_name);
                                 } catch (e) { /* skip failed */ }
