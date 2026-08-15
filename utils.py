@@ -370,19 +370,16 @@ def _build_vf_filters(clip, clip_duration, clip_index, total_clips, default_tran
     pos_x = int(clip.get("pos_x", 0))
     pos_y = int(clip.get("pos_y", 0))
 
-    if align_mode == "width":
-        # Width alignment: scale so width fills target, height scales proportionally
-        scale_filter = f"scale={target_w}:-2:force_original_aspect_ratio=decrease"
-        # After scaling, pad to target height, apply position offset
-        pad_x = f"(ow-iw)/2+{pos_x}*iw/100"
-        pad_y = f"(oh-ih)/2+{pos_y}*ih/100"
-        pad_filter = f"pad={target_w}:{target_h}:{pad_x}:{pad_y}:black"
-    else:
-        # Height alignment (default): scale so height fills target, width scales proportionally
-        scale_filter = f"scale=-2:{target_h}:force_original_aspect_ratio=decrease"
-        pad_x = f"(ow-iw)/2+{pos_x}*iw/100"
-        pad_y = f"(oh-ih)/2+{pos_y}*ih/100"
-        pad_filter = f"pad={target_w}:{target_h}:{pad_x}:{pad_y}:black"
+    # Scale to fit entirely within target dimensions (contain mode).
+    # Specify BOTH dimensions explicitly so force_original_aspect_ratio=decrease
+    # can properly constrain the output. Using -2 for one dimension lets the
+    # auto-calculated value exceed the other target dimension, causing
+    # "Padded dimensions cannot be smaller than input dimensions" errors.
+    scale_filter = f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease"
+    # Pad to exact target dimensions, centering the scaled image with position offset
+    pad_x = f"(ow-iw)/2+{pos_x}*iw/100"
+    pad_y = f"(oh-ih)/2+{pos_y}*ih/100"
+    pad_filter = f"pad={target_w}:{target_h}:{pad_x}:{pad_y}:black"
 
     filters = [
         scale_filter,
@@ -463,10 +460,14 @@ def _build_clip_command(clip, output_file, target_w, target_h, target_fps,
         return None
 
     track_type = clip.get("track_type")
+    ext = os.path.splitext(input_path)[1].lower()
+    is_image = ext in IMAGE_EXTENSIONS or clip.get("is_image", False)
 
     # --- Video-only clip (multi-track mode) ---
     if track_type == "video":
-        if trim_start > 0:
+        if is_image:
+            cmd.extend(["-loop", "1"])
+        if trim_start > 0 and not is_image:
             cmd.extend(["-ss", str(trim_start)])
         cmd.extend(["-i", input_path])
         cmd.extend(["-t", str(clip_duration)])
@@ -536,7 +537,9 @@ def _build_clip_command(clip, output_file, target_w, target_h, target_fps,
         return cmd
 
     # --- Legacy clip (no track_type: both video and audio) ---
-    if trim_start > 0:
+    if is_image:
+        cmd.extend(["-loop", "1"])
+    if trim_start > 0 and not is_image:
         cmd.extend(["-ss", str(trim_start)])
     cmd.extend(["-i", input_path])
     cmd.extend(["-t", str(clip_duration)])

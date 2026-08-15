@@ -155,20 +155,11 @@ class BSAIPremiereProTimeline:
                 merge_msg = f"Merge failed: {result_info}"
                 print(f"[BSAI Premiere Pro] {merge_msg}")
 
-            # When image+audio are connected, only merge the incoming pair into
-            # an independent file. Do NOT merge all timeline clips into one.
-            ui = {
-                "video_path": [merged_path if ok else ""],
-                "filename": [merged_name if ok else ""],
-                "clip_count": [str(len(data.get("clips", [])))],
-                "merge_msg": [merge_msg or ""],
-            }
+            # Update timeline store with newly added clip before merging all
             if timeline_updated:
-                ui["timeline_data"] = [json.dumps(data)]
                 _timeline_store[unique_id] = json.dumps(data)
-            return {"result": (merged_path if ok else "",), "ui": ui}
 
-        # ── Manual mode: no image+audio connected, merge all timeline clips ──
+        # ── Merge all timeline clips (including any newly added image+audio) ──
         clips = data.get("clips", [])
         if not clips:
             ui = {"error": ["No clips on timeline"]}
