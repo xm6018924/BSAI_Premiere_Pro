@@ -2109,6 +2109,9 @@ class TimelineEditor {
     _renderTimeline() {
         const container = this.modal.querySelector("[data-track-container]");
         if (!container) return;
+        // Save scroll position before clearing DOM (innerHTML reset causes scrollLeft to reset to 0)
+        const scrollContainer = container.parentElement;
+        const savedScrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
         container.innerHTML = "";
         const clips = this.td.clips || [];
         const videoTracks = this.td.video_tracks || [{ name: "V1", locked: false, visible: true }];
@@ -2192,6 +2195,26 @@ class TimelineEditor {
         }
         // Auto-load thumbnails after timeline render so they always appear
         this._loadThumbnails();
+        // Restore scroll position after re-rendering (innerHTML reset causes scrollLeft=0)
+        if (scrollContainer && savedScrollLeft > 0) {
+            scrollContainer.scrollLeft = savedScrollLeft;
+        }
+        // If a clip is selected, scroll to bring it into view
+        if (this.selectedIndex >= 0 && this.td.clips[this.selectedIndex] && scrollContainer) {
+            const clipBlock = container.querySelector(`[data-clip-idx="${this.selectedIndex}"]`);
+            if (clipBlock) {
+                const sRect = scrollContainer.getBoundingClientRect();
+                const bRect = clipBlock.getBoundingClientRect();
+                const SPACER_W = 150;
+                if (bRect.left < sRect.left + SPACER_W || bRect.right > sRect.right) {
+                    const clip = this.td.clips[this.selectedIndex];
+                    const clipStart = this._getClipStartTime(clip);
+                    const pps = this._pps || 15;
+                    const visW = scrollContainer.clientWidth || 800;
+                    scrollContainer.scrollLeft = Math.max(0, SPACER_W + clipStart * pps - visW / 2);
+                }
+            }
+        }
         // Render persistent playhead if set
         this._renderTimelinePlayhead();
     }
@@ -3803,8 +3826,10 @@ class TimelineEditor {
                     this._renderTimeline();
                     this._renderBoxBar();
                 } else {
+                    this._stopPlayback();
                     this.selectedIndex = clipIndex;
                     this.boxSelected.clear();
+                    this._playheadTime = this._getClipStartTime(clip);
                     this._renderAll();
                 }
             };
