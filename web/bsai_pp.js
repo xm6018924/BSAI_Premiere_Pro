@@ -5456,19 +5456,22 @@ class TimelineEditor {
 function _registerBsaiPP() {
     const app = window.comfyAPI?.app?.app ?? window.app;
     if (!app || typeof app.registerExtension !== "function") {
-        console.log("[BSAI Premiere Pro] Waiting for app...", !!window.comfyAPI, !!window.app);
-        setTimeout(_registerBsaiPP, 200);
+        setTimeout(_registerBsaiPP, 50);
         return;
     }
+    // Don't register twice (e.g. after successful retry)
+    if (window.__bsai_pp_registered) return;
     api = window.comfyAPI?.api?.api ?? window.api;
     console.log("[BSAI Premiere Pro] Registering extension, app found, api:", !!api);
     try {
     const _bsaiExt = {
     name: "BSAI.PremierePro",
 
-    async beforeRegisterNodeDef(nodeType, nodeData, appInstance) {
+    beforeRegisterNodeDef(nodeType, nodeData, appInstance) {
         if (nodeData.name !== NODE_TYPE) return;
-        if (nodeType.prototype._bsai_hooks_applied) return;
+        if (nodeType.prototype._bsai_hooks_applied
+            && nodeType.prototype.onDrawForeground?._bsai
+            && nodeType.prototype.computeSize?._bsai) return;
 
         const BTN_H = 26;
         const BTN_GAP = 4;
@@ -5860,9 +5863,11 @@ function _registerBsaiPP() {
             _checkPortConnections(this);
         };
 
-        // Mark hooks as applied so the fallback can detect
+        // Mark hooks as applied so the fallback/guard can detect
         nodeType.prototype._bsai_hooks_applied = true;
         nodeType.prototype.onDrawForeground._bsai = true;
+        nodeType.prototype.computeSize._bsai = true;
+        nodeType.prototype.onMouseDown._bsai = true;
 
         // ── Right-click menu fallback ──
         // If canvas buttons are not visible, users can still access
@@ -5887,78 +5892,117 @@ function _registerBsaiPP() {
     },
     };
     app.registerExtension(_bsaiExt);
+    window.__bsai_pp_registered = true;
     console.log("[BSAI Premiere Pro] Extension registered successfully");
 
     // Fallback: if node type was already registered before our extension
-    // loaded (e.g. script loaded late via bsai_pp_loader.js), manually
-    // apply hooks to the existing node type. Use retries for slower computers.
+    // loaded (race condition), manually apply hooks. Tries multiple methods:
+    // 1. window.LiteGraph (if available as global)
+    // 2. Node instance on canvas (via node.constructor)
     let _fallbackAttempts = 0;
+    let _fallbackDone = false;
     const _fallbackInterval = setInterval(() => {
+        if (_fallbackDone) { clearInterval(_fallbackInterval); return; }
         _fallbackAttempts++;
         try {
+            // Method 1: Try window.LiteGraph global (no canvas node needed)
             const lg = window.LiteGraph;
             if (lg && lg.registered_node_types && lg.registered_node_types[NODE_TYPE]) {
                 const nt = lg.registered_node_types[NODE_TYPE];
-                if (!nt.prototype._bsai_hooks_applied || !nt.prototype.onDrawForeground?._bsai) {
-                    console.log("[BSAI Premiere Pro] Applying hooks to pre-registered node type (attempt " + _fallbackAttempts + ")");
-                    _bsaiExt.beforeRegisterNodeDef(nt, { name: NODE_TYPE }, app);
-                }
-                // Also resize any existing node instances on canvas
-                const canvas = app.canvas || window.canvas;
-                if (canvas && canvas.graph && canvas.graph._nodes) {
-                    for (const node of canvas.graph._nodes) {
-                        if (node.type === NODE_TYPE) {
-                            // Force resize to show buttons
-                            requestAnimationFrame(() => {
-                                const computed = node.computeSize();
-                                node.setSize([Math.max(420, computed[0]), Math.max(computed[1], 260)]);
-                                node.setDirtyCanvas(true, true);
-                            });
-                        }
+                if (!nt.prototype._bsai_hooks_applied || !nt.prototype.onDrawForeground?._bsai || !nt.prototype.computeSize?._bsai) {
+                    console.log("[BSAI Premiere Pro] Applying hooks via LiteGraph global (attempt " + _fallbackAttempts + ")");
+                    try {
+                        _bsaiExt.beforeRegisterNodeDef(nt, { name: NODE_TYPE }, app);
+                    } catch (e) {
+                        console.error("[BSAI Premiere Pro] Failed to apply hooks via LiteGraph:", e);
                     }
                 }
+                _fallbackDone = true;
                 clearInterval(_fallbackInterval);
-                console.log("[BSAI Premiere Pro] Fallback completed successfully");
+                console.log("[BSAI Premiere Pro] Fallback completed via LiteGraph global");
+                return;
             }
+
+            // Method 2: Find a BSAI node instance on the canvas
+            const canvas = app.canvas || window.canvas;
+            if (!canvas || !canvas.graph || !canvas.graph._nodes) return;
+            let bsaiNode = null;
+            for (const node of canvas.graph._nodes) {
+                if (node.type === NODE_TYPE) { bsaiNode = node; break; }
+            }
+            if (!bsaiNode) return; // No node on canvas yet, keep waiting
+
+            const nt = bsaiNode.constructor;
+            if (!nt.prototype._bsai_hooks_applied || !nt.prototype.onDrawForeground?._bsai || !nt.prototype.computeSize?._bsai) {
+                console.log("[BSAI Premiere Pro] Applying hooks via node instance (attempt " + _fallbackAttempts + ")");
+                try {
+                    _bsaiExt.beforeRegisterNodeDef(nt, { name: NODE_TYPE }, app);
+                } catch (e) {
+                    console.error("[BSAI Premiere Pro] Failed to apply hooks via node instance:", e);
+                }
+            }
+            requestAnimationFrame(() => {
+                try {
+                    const computed = bsaiNode.computeSize();
+                    bsaiNode.setSize([Math.max(420, computed[0]), Math.max(computed[1], 260)]);
+                    bsaiNode.setDirtyCanvas(true, true);
+                } catch (e) {
+                    console.error("[BSAI Premiere Pro] Fallback resize failed:", e);
+                }
+            });
+            _fallbackDone = true;
+            clearInterval(_fallbackInterval);
+            console.log("[BSAI Premiere Pro] Fallback completed via node instance");
         } catch (e) {
             console.error("[BSAI Premiere Pro] Fallback attempt " + _fallbackAttempts + " failed:", e);
         }
-        if (_fallbackAttempts >= 30) { // 30 * 500ms = 15 seconds max
+        if (_fallbackAttempts >= 60) { // 60 * 500ms = 30 seconds max
             clearInterval(_fallbackInterval);
-            console.error("[BSAI Premiere Pro] Fallback: max attempts (30) reached. Node type '" + NODE_TYPE + "' not found.");
+            console.warn("[BSAI Premiere Pro] Fallback: max attempts reached. Guard will handle it.");
         }
     }, 500);
 
     // ── Continuous button visibility guard ──
-    // Periodically check all BSAI nodes and ensure buttons are visible.
-    // This handles late node creation, graph load/restore, and any edge case
-    // where onDrawForeground or computeSize hooks were lost.
+    // Periodically check all BSAI nodes and ensure ALL hooks are intact.
+    // Handles: late node creation, graph load/restore, hooks overwritten
+    // by other extensions, and any edge case where hooks were lost.
     setInterval(() => {
         try {
             const canvas = app.canvas || window.canvas;
             if (!canvas || !canvas.graph || !canvas.graph._nodes) return;
             for (const node of canvas.graph._nodes) {
                 if (node.type !== NODE_TYPE) continue;
-                // Check if onDrawForeground is still our function (not overwritten)
-                if (!node.onDrawForeground || !node.onDrawForeground._bsai) {
-                    // Delete instance-level override so prototype function is used
-                    if (node.hasOwnProperty('onDrawForeground')) {
-                        delete node.onDrawForeground;
-                    }
-                    if (node.hasOwnProperty('onMouseDown')) {
-                        delete node.onMouseDown;
-                    }
-                    if (node.hasOwnProperty('computeSize')) {
-                        delete node.computeSize;
-                    }
-                    const lg = window.LiteGraph;
-                    const nt = lg?.registered_node_types?.[NODE_TYPE];
-                    if (nt && (!nt.prototype._bsai_hooks_applied || !nt.prototype.onDrawForeground?._bsai)) {
-                        console.log("[BSAI Premiere Pro] Re-applying hooks (guard: onDrawForeground missing)");
-                        _bsaiExt.beforeRegisterNodeDef(nt, { name: NODE_TYPE }, app);
+
+                // Check if ANY of our hooks are missing or overwritten
+                const needsHooks = !node.onDrawForeground?._bsai
+                    || !node.computeSize?._bsai
+                    || !node.onMouseDown?._bsai
+                    || typeof node._bsaiBrowseDir !== 'function'
+                    || typeof node._bsaiOpenEditor !== 'function';
+
+                if (needsHooks) {
+                    if (node.hasOwnProperty('onDrawForeground')) delete node.onDrawForeground;
+                    if (node.hasOwnProperty('onMouseDown')) delete node.onMouseDown;
+                    if (node.hasOwnProperty('computeSize')) delete node.computeSize;
+                    if (node.hasOwnProperty('getExtraMenuOptions')) delete node.getExtraMenuOptions;
+
+                    // Use node.constructor (works even when window.LiteGraph is not available)
+                    const nt = node.constructor;
+                    const protoNeedsHooks = !nt.prototype._bsai_hooks_applied
+                        || !nt.prototype.onDrawForeground?._bsai
+                        || !nt.prototype.computeSize?._bsai;
+
+                    if (protoNeedsHooks) {
+                        console.log("[BSAI Premiere Pro] Re-applying hooks (guard: hooks missing, node id=" + node.id + ")");
+                        try {
+                            _bsaiExt.beforeRegisterNodeDef(nt, { name: NODE_TYPE }, app);
+                        } catch (e) {
+                            console.error("[BSAI Premiere Pro] Guard: failed to re-apply hooks:", e);
+                        }
                     }
                 }
-                // Always force resize and redraw to ensure buttons are visible
+
+                // Always force resize to ensure buttons are visible
                 const BTN_H = 26, BTN_GAP = 4, BTN_MARGIN = 10;
                 const BTN_EXTRA = BTN_H * 2 + BTN_GAP + BTN_MARGIN;
                 let expectedMinH = 260 + BTN_EXTRA;
@@ -5968,17 +6012,73 @@ function _registerBsaiPP() {
                         expectedMinH = computed[1];
                     }
                 } catch {}
-                if (typeof node.size[1] !== 'number' || isNaN(node.size[1]) || node.size[1] < expectedMinH - 5) {
-                    node.setSize([Math.max(420, node.size[0] || 420), Math.max(expectedMinH, 260 + BTN_EXTRA)]);
+                if (typeof node.size?.[1] !== 'number' || isNaN(node.size[1]) || node.size[1] < expectedMinH - 5) {
+                    node.setSize([Math.max(420, node.size?.[0] || 420), Math.max(expectedMinH, 260 + BTN_EXTRA)]);
                 }
                 node.setDirtyCanvas?.(true, true);
             }
         } catch (e) {
-            // Silent - guard should not spam console
+            console.error("[BSAI Premiere Pro] Guard error:", e);
         }
     }, 500);
+
+    // ── Canvas onNodeAdded hook ──
+    // Hook into the graph to immediately apply hooks when a BSAI node is added.
+    // This catches drag-drop, right-click add, and workflow load faster than
+    // the 500ms guard.
+    function _installNodeAddedHook() {
+        const canvas = app.canvas || window.canvas;
+        if (!canvas || !canvas.graph) return false;
+        if (canvas.graph._bsai_node_added_hooked) return true;
+
+        const graph = canvas.graph;
+        const origOnNodeAdded = graph.onNodeAdded;
+        graph.onNodeAdded = function (node) {
+            origOnNodeAdded?.apply(this, arguments);
+            if (node && node.type === NODE_TYPE) {
+                const nt = node.constructor;
+                if (!nt.prototype._bsai_hooks_applied || !nt.prototype.onDrawForeground?._bsai || !nt.prototype.computeSize?._bsai) {
+                    console.log("[BSAI Premiere Pro] Applying hooks via onNodeAdded");
+                    try {
+                        _bsaiExt.beforeRegisterNodeDef(nt, { name: NODE_TYPE }, app);
+                    } catch (e) {
+                        console.error("[BSAI Premiere Pro] onNodeAdded hook failed:", e);
+                    }
+                }
+                requestAnimationFrame(() => {
+                    try {
+                        const computed = node.computeSize();
+                        node.setSize([Math.max(420, computed[0]), Math.max(computed[1], 260)]);
+                        node.setDirtyCanvas(true, true);
+                    } catch {}
+                });
+            }
+        };
+        graph._bsai_node_added_hooked = true;
+        return true;
+    }
+
+    // Re-install onNodeAdded hook whenever graph changes (new workflow loaded).
+    // The check is a single property access — negligible cost to run forever.
+    const _graphHookInterval = setInterval(() => {
+        const canvas = app.canvas || window.canvas;
+        if (!canvas || !canvas.graph) return;
+        if (canvas.graph._bsai_node_added_hooked) return;
+        _installNodeAddedHook();
+    }, 1000);
     } catch (e) {
         console.error("[BSAI Premiere Pro] Extension registration failed:", e);
+        // ComfyUI 0.33.0: registerExtension() internally uses Pinia/Vue stores
+        // (useStore) which may not be initialized yet when our script loads.
+        // Retry until Pinia is ready.
+        if (!window.__bsai_pp_retry_count) window.__bsai_pp_retry_count = 0;
+        window.__bsai_pp_retry_count++;
+        if (window.__bsai_pp_retry_count <= 100) { // 100 * 200ms = 20s max
+            console.log("[BSAI Premiere Pro] Retrying in 200ms (attempt " + window.__bsai_pp_retry_count + "/100)...");
+            setTimeout(_registerBsaiPP, 200);
+        } else {
+            console.error("[BSAI Premiere Pro] Max registration retries (100) reached.");
+        }
     }
 }
 _registerBsaiPP();
