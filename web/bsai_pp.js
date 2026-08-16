@@ -1460,47 +1460,38 @@ class TimelineEditor {
             }
         }
 
-        // Snap audio clips to nearby video starts and audio clip ends (±0.5s threshold)
+        // Snap clips to nearby positions (track head, clip ends/starts) for seamless alignment
         let finalDropTime = Math.max(0, dropTime);
+        const SNAP_THRESHOLD = 0.5; // seconds
+        let bestSnap = null;
+        let bestSnapDist = SNAP_THRESHOLD;
+        // Snap to track head (position 0)
+        if (finalDropTime < bestSnapDist) {
+            bestSnapDist = finalDropTime;
+            bestSnap = 0;
+        }
+        // Snap to same-track clip ends and starts
+        for (const c of this.td.clips) {
+            if (c === clip || c.track_type !== trackType || c.track_index !== newTrackIndex) continue;
+            const cStart = this._getClipStartTime(c);
+            const cDur = (c.trim_end || c.duration || 0) - (c.trim_start || 0);
+            const cEnd = cStart + cDur;
+            const distEnd = Math.abs(finalDropTime - cEnd);
+            if (distEnd < bestSnapDist) { bestSnapDist = distEnd; bestSnap = cEnd; }
+            const distStart = Math.abs(finalDropTime - cStart);
+            if (distStart < bestSnapDist) { bestSnapDist = distStart; bestSnap = cStart; }
+        }
+        // For audio: also snap to video clip start times
         if (trackType === "audio") {
-            const SNAP_THRESHOLD = 0.5; // seconds
-            let bestSnap = null;
-            let bestSnapDist = SNAP_THRESHOLD;
-            // Snap to video clip start times
             for (const vClip of this.td.clips) {
                 if (vClip.track_type !== "video") continue;
                 const vStart = this._getClipStartTime(vClip);
                 const dist = Math.abs(finalDropTime - vStart);
-                if (dist < bestSnapDist) {
-                    bestSnapDist = dist;
-                    bestSnap = vStart;
-                }
+                if (dist < bestSnapDist) { bestSnapDist = dist; bestSnap = vStart; }
             }
-            // Snap to audio clip end times on the same track (for independent audio placement)
-            for (const aClip of this.td.clips) {
-                if (aClip.track_type !== "audio" || aClip === clip) continue;
-                if (aClip.track_index !== newTrackIndex) continue;
-                const aEnd = this._getClipStartTime(aClip) + ((aClip.trim_end || aClip.duration || 0) - (aClip.trim_start || 0));
-                const dist = Math.abs(finalDropTime - aEnd);
-                if (dist < bestSnapDist) {
-                    bestSnapDist = dist;
-                    bestSnap = aEnd;
-                }
-            }
-            // Also snap to audio clip start times on the same track
-            for (const aClip of this.td.clips) {
-                if (aClip.track_type !== "audio" || aClip === clip) continue;
-                if (aClip.track_index !== newTrackIndex) continue;
-                const aStart = this._getClipStartTime(aClip);
-                const dist = Math.abs(finalDropTime - aStart);
-                if (dist < bestSnapDist) {
-                    bestSnapDist = dist;
-                    bestSnap = aStart;
-                }
-            }
-            if (bestSnap !== null) {
-                finalDropTime = bestSnap;
-            }
+        }
+        if (bestSnap !== null) {
+            finalDropTime = bestSnap;
         }
 
         clip.track_index = newTrackIndex;
@@ -1557,9 +1548,8 @@ class TimelineEditor {
         this.selectedIndex = this.td.clips.indexOf(clip);
         this._save();
         this._renderAll();
-        if (trackType === "audio") {
-            this._toast(`已移动音频到 ${formatTime(finalDropTime)}${finalDropTime !== dropTime ? " (已吸附对齐)" : ""}`, "success");
-        }
+        const label = trackType === "audio" ? "音频" : "视频";
+        this._toast(`已移动${label}到 ${formatTime(finalDropTime)}${finalDropTime !== dropTime ? " (已吸附对齐)" : ""}`, "success");
     }
 
     _save() {
@@ -3695,11 +3685,29 @@ class TimelineEditor {
         dialog.querySelector("[data-cancel]").onclick = () => overlay.remove();
         dialog.querySelector("[data-confirm]").onclick = () => {
             const clipIdsToDelete = new Set();
+            const deletedClipsInfo = [];
             for (const idx of indices) {
                 const clip = this.td.clips[idx];
                 if (!clip) continue;
+                const start = this._getClipStartTime(clip);
+                const dur = (clip.trim_end || clip.duration || 0) - (clip.trim_start || 0);
+                deletedClipsInfo.push({
+                    track_type: clip.track_type, track_index: clip.track_index,
+                    start_time: start, end_time: start + dur
+                });
                 clipIdsToDelete.add(clip.id);
-                if (clip.linked_id) clipIdsToDelete.add(clip.linked_id);
+                if (clip.linked_id) {
+                    clipIdsToDelete.add(clip.linked_id);
+                    const linked = this.td.clips.find(c => c.id === clip.linked_id);
+                    if (linked) {
+                        const lStart = this._getClipStartTime(linked);
+                        const lDur = (linked.trim_end || linked.duration || 0) - (linked.trim_start || 0);
+                        deletedClipsInfo.push({
+                            track_type: linked.track_type, track_index: linked.track_index,
+                            start_time: lStart, end_time: lStart + lDur
+                        });
+                    }
+                }
             }
             const fileNamesToDelete = new Set();
             for (const idx of indices) {
@@ -3707,8 +3715,8 @@ class TimelineEditor {
                 if (clip) fileNamesToDelete.add(clip.file_name);
             }
             this.td.clips = this.td.clips.filter(c => !clipIdsToDelete.has(c.id));
+            this._rippleDeleteShift(deletedClipsInfo);
             this.td.known_files = (this.td.known_files || []).filter(f => !fileNamesToDelete.has(f));
-            // Track deleted files to prevent auto-reimport
             if (!this.td.deleted_files) this.td.deleted_files = [];
             for (const fn of fileNamesToDelete) {
                 if (!this.td.deleted_files.includes(fn)) this.td.deleted_files.push(fn);
@@ -4161,13 +4169,31 @@ class TimelineEditor {
         const indices = [...this.boxSelected].sort((a, b) => b - a);
         const clipIdsToDelete = new Set();
         const fileNamesToDelete = new Set();
+        const deletedClipsInfo = [];
         let skippedLocked = 0;
         for (const idx of indices) {
             const clip = this.td.clips[idx];
             if (!clip) continue;
             if (this._isTrackLocked(clip)) { skippedLocked++; continue; }
+            const start = this._getClipStartTime(clip);
+            const dur = (clip.trim_end || clip.duration || 0) - (clip.trim_start || 0);
+            deletedClipsInfo.push({
+                track_type: clip.track_type, track_index: clip.track_index,
+                start_time: start, end_time: start + dur
+            });
             clipIdsToDelete.add(clip.id);
-            if (clip.linked_id) clipIdsToDelete.add(clip.linked_id);
+            if (clip.linked_id) {
+                clipIdsToDelete.add(clip.linked_id);
+                const linked = this.td.clips.find(c => c.id === clip.linked_id);
+                if (linked) {
+                    const lStart = this._getClipStartTime(linked);
+                    const lDur = (linked.trim_end || linked.duration || 0) - (linked.trim_start || 0);
+                    deletedClipsInfo.push({
+                        track_type: linked.track_type, track_index: linked.track_index,
+                        start_time: lStart, end_time: lStart + lDur
+                    });
+                }
+            }
             fileNamesToDelete.add(clip.file_name);
         }
         if (skippedLocked > 0) {
@@ -4178,6 +4204,7 @@ class TimelineEditor {
             if (!this.td.deleted_files.includes(fn)) this.td.deleted_files.push(fn);
         }
         this.td.clips = this.td.clips.filter(c => !clipIdsToDelete.has(c.id));
+        this._rippleDeleteShift(deletedClipsInfo);
         this.boxSelected.clear();
         this.selectedIndex = -1;
         this._save();
@@ -5186,28 +5213,64 @@ class TimelineEditor {
         this._renderAll();
     }
 
+    _rippleDeleteShift(deletedClipsInfo) {
+        const byTrack = new Map();
+        for (const dc of deletedClipsInfo) {
+            const key = `${dc.track_type}:${dc.track_index}`;
+            if (!byTrack.has(key)) byTrack.set(key, []);
+            byTrack.get(key).push(dc);
+        }
+        for (const [key, deletedList] of byTrack) {
+            const parts = key.split(':');
+            const trackType = parts[0];
+            const trackIndex = parseInt(parts[1]);
+            deletedList.sort((a, b) => a.start_time - b.start_time);
+            for (const dc of deletedList) {
+                const shift = dc.end_time - dc.start_time;
+                if (shift <= 0) continue;
+                for (const clip of this.td.clips) {
+                    if (clip.track_type !== trackType || clip.track_index !== trackIndex) continue;
+                    if (typeof clip.start_time !== 'number') continue;
+                    if (clip.start_time >= dc.end_time) {
+                        clip.start_time -= shift;
+                    }
+                }
+            }
+        }
+    }
+
     _deleteClip(index) {
         const clip = this.td.clips[index];
         if (!clip) return;
-        // Check track locking
         if (this._isTrackLocked(clip)) {
             this._toast("该轨道已锁定，无法删除片段", "error");
             return;
         }
-        // Track deleted file to prevent auto-reimport
         if (!this.td.deleted_files) this.td.deleted_files = [];
         if (!this.td.deleted_files.includes(clip.file_name)) {
             this.td.deleted_files.push(clip.file_name);
         }
-        // If linked, also delete the linked partner (both removed, no gap - clips shift forward)
+        const deletedClipsInfo = [];
+        const collectInfo = (c) => {
+            const start = this._getClipStartTime(c);
+            const dur = (c.trim_end || c.duration || 0) - (c.trim_start || 0);
+            deletedClipsInfo.push({
+                track_type: c.track_type,
+                track_index: c.track_index,
+                start_time: start,
+                end_time: start + dur
+            });
+        };
+        collectInfo(clip);
         if (clip.linked_id) {
+            const linkedClip = this.td.clips.find(c => c.id === clip.linked_id);
+            if (linkedClip) collectInfo(linkedClip);
             const idsToDelete = new Set([clip.id, clip.linked_id]);
-            // Simply remove both clips - remaining clips naturally shift forward
             this.td.clips = this.td.clips.filter(c => !idsToDelete.has(c.id));
         } else {
-            // Unlinked clip: simply remove it - remaining clips on the same track automatically shift forward
             this.td.clips = this.td.clips.filter(c => c.id !== clip.id);
         }
+        this._rippleDeleteShift(deletedClipsInfo);
         this.selectedIndex = -1;
         this.boxSelected.clear();
         this._save();
