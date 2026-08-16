@@ -5468,6 +5468,7 @@ function _registerBsaiPP() {
 
     async beforeRegisterNodeDef(nodeType, nodeData, appInstance) {
         if (nodeData.name !== NODE_TYPE) return;
+        if (nodeType.prototype._bsai_hooks_applied) return;
 
         const BTN_H = 26;
         const BTN_GAP = 4;
@@ -5618,15 +5619,26 @@ function _registerBsaiPP() {
                 if (localPos[0] >= btn.x && localPos[0] <= btn.x + btn.w &&
                     localPos[1] >= btn.y && localPos[1] <= btn.y + btn.h) {
                     if (btn.action === "browse") {
-                        const dirWidget = this.widgets?.find(w => w.name === "watch_directory");
-                        const oldDir = dirWidget?.value || "";
-                        // Use Windows Explorer folder picker via webkitdirectory
-                        const dirInput = document.createElement("input");
-                        dirInput.type = "file";
-                        dirInput.setAttribute("webkitdirectory", "");
-                        dirInput.style.display = "none";
-                        document.body.appendChild(dirInput);
-                        dirInput.onchange = async () => {
+                        this._bsaiBrowseDir();
+                    } else if (btn.action === "editor") {
+                        this._bsaiOpenEditor();
+                    }
+                    return true;
+                }
+            }
+            return r;
+        };
+
+        // ── Browse directory method (used by button + right-click menu) ──
+        nodeType.prototype._bsaiBrowseDir = function () {
+            const dirWidget = this.widgets?.find(w => w.name === "watch_directory");
+            const oldDir = dirWidget?.value || "";
+            const dirInput = document.createElement("input");
+            dirInput.type = "file";
+            dirInput.setAttribute("webkitdirectory", "");
+            dirInput.style.display = "none";
+            document.body.appendChild(dirInput);
+            dirInput.onchange = async () => {
                             const files = Array.from(dirInput.files || []);
                             document.body.removeChild(dirInput);
                             if (files.length === 0) return;
@@ -5734,17 +5746,15 @@ function _registerBsaiPP() {
                             if (importer) {
                                 importer.updateNodeTitle(td);
                             }
-                        };
-                        dirInput.click();
-                    } else if (btn.action === "editor") {
-                        const editor = new TimelineEditor(this);
-                        editor.open();
-                    }
-                    return true;
-                }
-            }
-            return r;
         };
+        dirInput.click();
+    };
+
+    // ── Open timeline editor method (used by button + right-click menu) ──
+    nodeType.prototype._bsaiOpenEditor = function () {
+        const editor = new TimelineEditor(this);
+        editor.open();
+    };
 
         // ── Add height for buttons via computeSize ──
         const oldComputeSize = nodeType.prototype.computeSize;
@@ -5853,6 +5863,27 @@ function _registerBsaiPP() {
         // Mark hooks as applied so the fallback can detect
         nodeType.prototype._bsai_hooks_applied = true;
         nodeType.prototype.onDrawForeground._bsai = true;
+
+        // ── Right-click menu fallback ──
+        // If canvas buttons are not visible, users can still access
+        // the same functionality via right-click context menu
+        const oldGetMenu = nodeType.prototype.getExtraMenuOptions;
+        nodeType.prototype.getExtraMenuOptions = function (canvas, options) {
+            oldGetMenu?.apply(this, arguments);
+            options.push({
+                content: "📂 浏览监视目录",
+                callback: () => {
+                    this._bsaiBrowseDir?.();
+                },
+            });
+            options.push({
+                content: "🎬 打开时间轴编辑器",
+                callback: () => {
+                    this._bsaiOpenEditor?.();
+                },
+            });
+            return options;
+        };
     },
     };
     app.registerExtension(_bsaiExt);
