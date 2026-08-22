@@ -57,6 +57,7 @@ class BSAIPremiereProTimeline:
             "optional": {
                 "image": ("IMAGE",),
                 "audio": ("AUDIO",),
+                "clip_videos": ("STRING", {"tooltip": "JSON list of clip video file paths from BSAI H3 Film Factory. Each clip is auto-added to the timeline."}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -71,7 +72,7 @@ class BSAIPremiereProTimeline:
 
     def render(self, watch_directory, auto_import, default_transition,
                transition_duration, output_filename, format,
-               pix_fmt, crf, frame_rate, image=None, audio=None, unique_id=None):
+               pix_fmt, crf, frame_rate, image=None, audio=None, clip_videos=None, unique_id=None):
 
         from .server import _timeline_store
         timeline_data = _timeline_store.get(unique_id, '{"clips":[],"known_files":[],"deleted_files":[],"directory_history":{}}')
@@ -158,6 +159,97 @@ class BSAIPremiereProTimeline:
             # Update timeline store with newly added clip before merging all
             if timeline_updated:
                 _timeline_store[unique_id] = json.dumps(data)
+
+        # ── Add clip_videos from BSAI H3 Film Factory to timeline ──
+        # clip_videos is a JSON string containing a list of clip info dicts,
+        # each with file_path, duration, width, height, fps, has_audio, etc.
+        # Each clip is added as a linked video+audio pair on the timeline.
+        # If a clip with the same file_name already exists, it is replaced
+        # (supporting re-rendered clips).
+        if clip_videos and clip_videos.strip():
+            try:
+                clips_list = json.loads(clip_videos)
+                if isinstance(clips_list, list):
+                    for cv in clips_list:
+                        file_path = cv.get("file_path", "")
+                        file_name = cv.get("file_name", os.path.basename(file_path))
+                        if not file_path or not os.path.exists(file_path):
+                            print(f"[BSAI Premiere Pro] clip_videos: file not found: {file_path}")
+                            continue
+
+                        clip_dur = float(cv.get("duration", 0))
+                        clip_w = int(cv.get("width", 0))
+                        clip_h = int(cv.get("height", 0))
+                        clip_fps = float(cv.get("fps", 24))
+                        clip_has_audio = bool(cv.get("has_audio", True))
+                        clip_index = int(cv.get("clip_index", -1))
+                        clip_name = cv.get("clip_name", f"CLIP{clip_index+1}" if clip_index >= 0 else "CLIP")
+
+                        # Check if this clip already exists on timeline (by file_name)
+                        existing_clips = data.get("clips", [])
+                        existing_entry = None
+                        for ec in existing_clips:
+                            if ec.get("file_name") == file_name:
+                                existing_entry = ec
+                                break
+
+                        if existing_entry:
+                            # Replace: update the existing clip's file path and metadata
+                            # (re-rendered clip replaces old one on timeline)
+                            for ec in existing_clips:
+                                if ec.get("file_name") == file_name:
+                                    ec["file_path"] = file_path
+                                    ec["duration"] = clip_dur
+                                    ec["width"] = clip_w
+                                    ec["height"] = clip_h
+                                    ec["fps"] = clip_fps
+                                    ec["has_audio"] = clip_has_audio
+                                    ec["trim_end"] = clip_dur
+                                    print(f"[BSAI Premiere Pro] clip_videos: replaced '{file_name}' on timeline (re-rendered)")
+                            timeline_updated = True
+                        else:
+                            # Add new clip to timeline as linked video+audio pair
+                            ts = int(time.time() * 1000) + clip_index
+                            vId = f"clip_{ts}_{id(data)}"
+                            aId = f"clip_{ts + 1}_{id(data)}"
+                            base = {
+                                "file_path": file_path,
+                                "file_name": file_name,
+                                "created_time": time.time(),
+                                "duration": clip_dur,
+                                "width": clip_w,
+                                "height": clip_h,
+                                "fps": clip_fps,
+                                "has_audio": clip_has_audio,
+                                "trim_start": 0,
+                                "trim_end": clip_dur,
+                                "transition_in": default_transition,
+                                "transition_out": default_transition,
+                                "transition_duration": transition_duration,
+                                "audio_replacement": None,
+                                "audio_fade_in": 0,
+                                "audio_fade_out": 0,
+                                "video_enabled": True,
+                                "audio_enabled": True,
+                                "label": clip_name,
+                            }
+                            data["clips"].append({**base, "id": vId, "track_type": "video", "track_index": 0, "linked_id": aId, "is_video_part": True})
+                            data["clips"].append({**base, "id": aId, "track_type": "audio", "track_index": 0, "linked_id": vId, "is_video_part": False})
+                            if file_name not in data.get("known_files", []):
+                                data["known_files"].append(file_name)
+                            timeline_updated = True
+                            print(f"[BSAI Premiere Pro] clip_videos: added '{file_name}' to timeline ({clip_dur:.1f}s, {clip_w}x{clip_h})")
+
+                    if timeline_updated:
+                        _timeline_store[unique_id] = json.dumps(data)
+                        merge_msg = f"Added {len(clips_list)} clip(s) from H3 Film Factory"
+                else:
+                    print(f"[BSAI Premiere Pro] clip_videos: invalid JSON (not a list)")
+            except json.JSONDecodeError as _je:
+                print(f"[BSAI Premiere Pro] clip_videos: JSON parse error: {_je}")
+            except Exception as _ce:
+                print(f"[BSAI Premiere Pro] clip_videos: error: {_ce}")
+                traceback.print_exc()
 
         # ── Merge all timeline clips (including any newly added image+audio) ──
         clips = data.get("clips", [])
