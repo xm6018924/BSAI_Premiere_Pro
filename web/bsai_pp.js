@@ -315,6 +315,9 @@ const STYLES = `
     width: 100%; height: 100%; object-fit: contain; object-position: center; background: #000;
     transition: transform 0.1s ease;
 }
+/* Responsive: video always fills overlay, overlay always fills parent.
+   When the user resizes the modal (resize:both), the overlay and video
+   automatically follow because they use percentage-based dimensions. */
 .bsai-pp-timeline-preview .preview-close {
     position: absolute; top: 6px; right: 6px; z-index: 301;
     background: rgba(0,0,0,0.7); color: #fff; border: none;
@@ -1897,24 +1900,18 @@ class TimelineEditor {
         this.modal.querySelector('[data-act="enlarge-preview"]').onclick = (e) => {
             e.stopPropagation();
             const overlay = this.modal.querySelector("[data-timeline-preview]");
-            if (!overlay) return;
-            // Toggle between fullscreen and windowed mode
-            if (overlay.classList.contains("fullscreen")) {
-                // Switch to windowed (small) mode
-                overlay.classList.remove("fullscreen");
-                overlay.style.width = "60%";
-                overlay.style.height = "70%";
-                overlay.style.top = "50%";
-                overlay.style.left = "50%";
-                overlay.style.transform = "translate(-50%,-50%)";
-                overlay.style.borderRadius = "8px";
-                overlay.style.boxShadow = "0 4px 20px rgba(0,0,0,0.6)";
+            const video = this.modal.querySelector("[data-preview-video]");
+            if (!overlay || !video) return;
+            // Toggle between "contain" (show full video with letterbox) and
+            // "cover" (fill area, may crop).  In both modes the overlay
+            // always fills 100% of its parent so it auto-resizes with the
+            // modal window.
+            if (video.style.objectFit === "cover") {
+                video.style.objectFit = "contain";
                 e.target.textContent = "⛶";
             } else {
-                // Switch back to fullscreen mode
-                overlay.classList.add("fullscreen");
-                overlay.style.cssText = "";
-                e.target.textContent = "🗗";
+                video.style.objectFit = "cover";
+                e.target.textContent = "⊷";
             }
         };
         // Mouse wheel to zoom preview video
@@ -5450,12 +5447,13 @@ class TimelineEditor {
             if (infoEl) infoEl.textContent = `🎞️ 渲染结果: ${filename}`;
             this._previewZoom = 1;
             video.style.transform = "";
-            // Fill entire preview area, use contain to show full video without cropping
-            overlay.style.width = "100%";
-            overlay.style.height = "100%";
-            overlay.style.left = "0";
-            overlay.style.top = "0";
-            overlay.style.transform = "none";
+            // Always fill 100% of parent — the overlay uses percentage
+            // dimensions so it auto-resizes when the modal is resized.
+            overlay.style.width = "";
+            overlay.style.height = "";
+            overlay.style.left = "";
+            overlay.style.top = "";
+            overlay.style.transform = "";
             video.style.width = "100%";
             video.style.height = "100%";
             video.style.objectFit = "contain";
