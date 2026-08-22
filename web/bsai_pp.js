@@ -1648,7 +1648,7 @@ class TimelineEditor {
                     <input type="checkbox" data-act="auto-import" ${this._getWidgetValue("auto_import", true) ? "checked" : ""}>
                     <label>监视目录</label>
                     <input type="text" data-act="dir" value="${escapeHtml(this._getWidgetValue("watch_directory", "output"))}" style="width:120px;">
-                    <button class="bsai-pp-btn" data-act="browse-dir">📁 浏览</button>
+                    <button class="bsai-pp-btn" data-act="open-source-dir">📂 源目录</button>
                     <label>仅带音频</label>
                     <input type="checkbox" data-act="filter-audio" ${this.td.filter_audio_only !== false ? "checked" : ""}>
                     <button class="bsai-pp-btn" data-act="scan">🔍 扫描</button>
@@ -2101,7 +2101,7 @@ class TimelineEditor {
             }
         };
         document.addEventListener("keydown", this._docKeydown);
-        this.modal.querySelector('[data-act="browse-dir"]').onclick = () => this._browseDirectory();
+        this.modal.querySelector('[data-act="open-source-dir"]').onclick = () => this._openSourceDirectory();
         this.modal.querySelector('[data-act="add-vtrack"]').onclick = () => this._addVideoTrack();
         this.modal.querySelector('[data-act="add-atrack"]').onclick = () => this._addAudioTrack();
         this.modal.querySelector('[data-act="clear-all"]').onclick = () => this._clearAllClips();
@@ -2507,6 +2507,47 @@ class TimelineEditor {
         this._save();
         this._renderTimeline();
         this._toast(`已添加音频轨道 A${idx + 1}`, "success");
+    }
+
+    async _openSourceDirectory() {
+        // Find the source directory from timeline clips
+        const clips = this.td.clips || [];
+        let sourcePath = null;
+        for (const clip of clips) {
+            const fp = clip.file_path || "";
+            if (fp) {
+                // Get the directory of the file
+                const lastSlash = Math.max(fp.lastIndexOf("/"), fp.lastIndexOf("\\"));
+                if (lastSlash > 0) {
+                    sourcePath = fp.substring(0, lastSlash);
+                } else {
+                    // Relative path like "output/filename.mp4"
+                    sourcePath = fp;
+                }
+                break;
+            }
+        }
+        if (!sourcePath) {
+            this._toast("时间轴上没有视频文件", "warning");
+            return;
+        }
+        try {
+            const resp = await api.fetchApi(`/bsai_premiere_pro/open_explorer?path=${encodeURIComponent(sourcePath)}`);
+            const text = await resp.text();
+            if (!text) {
+                this._toast("服务器无响应，请重启 ComfyUI 后重试", "warning");
+                return;
+            }
+            let data;
+            try { data = JSON.parse(text); } catch { data = { error: text }; }
+            if (data.error) {
+                this._toast(`无法打开目录: ${data.error}`, "error");
+            } else {
+                this._toast(`已打开源目录: ${sourcePath}`, "success");
+            }
+        } catch (e) {
+            this._toast(`打开目录失败: ${e.message || e}`, "error");
+        }
     }
 
     async _browseDirectory() {

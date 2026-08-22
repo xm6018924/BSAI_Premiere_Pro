@@ -479,3 +479,34 @@ async def upload_file(request):
                 "has_audio": (info or {}).get("has_audio", False),
             })
     return web.json_response({"files": results})
+
+
+@PromptServer.instance.routes.get("/bsai_premiere_pro/open_explorer")
+async def open_explorer(request):
+    """Open Windows Explorer at the specified directory path."""
+    raw_path = request.query.get("path", "")
+    dir_path = urllib.parse.unquote(raw_path)
+    if not dir_path:
+        return web.json_response({"error": "No path provided"}, status=400)
+    try:
+        # Resolve relative paths (e.g. "output" → ComfyUI/output)
+        if not os.path.isabs(dir_path):
+            try:
+                import folder_paths
+                base = folder_paths.base_path
+            except Exception:
+                base = os.getcwd()
+            candidate = os.path.join(base, dir_path)
+            if os.path.exists(candidate):
+                dir_path = candidate
+        if not os.path.exists(dir_path):
+            return web.json_response({"error": f"Path not found: {dir_path}"}, status=404)
+        if os.name == "nt":
+            import subprocess
+            subprocess.Popen(["explorer", dir_path])
+        else:
+            import subprocess
+            subprocess.Popen(["xdg-open", dir_path])
+        return web.json_response({"success": True, "path": dir_path})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
