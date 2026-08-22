@@ -301,7 +301,9 @@ const STYLES = `
 .bsai-pp-no-selection {
     color: #555; font-size: 13px; padding: 30px; text-align: center;
 }
-/* ── Timeline playback overlay (replaces separate preview window) ── */
+/* ── Timeline playback overlay ──
+   Default (no inline styles): covers the entire modal (for post-merge render preview).
+   When JS sets inline top/left/width/height: constrained to timeline section (for pre-merge playback). */
 .bsai-pp-timeline-preview {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     background: #000; z-index: 300; display: none;
@@ -309,7 +311,8 @@ const STYLES = `
 }
 .bsai-pp-timeline-preview.visible { display: flex; }
 .bsai-pp-timeline-preview.fullscreen {
-    width: 100%; height: 100%; top: 0; left: 0; transform: none;
+    /* Clear inline constraints so overlay covers entire modal */
+    top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important;
 }
 .bsai-pp-timeline-preview video {
     width: 100%; height: 100%; object-fit: contain; object-position: center; background: #000;
@@ -1873,6 +1876,24 @@ class TimelineEditor {
             };
         }
 
+        // ResizeObserver: update overlay position when timeline section resizes
+        const timelineSectionEl = this.modal.querySelector(".bsai-pp-timeline-section");
+        if (timelineSectionEl && window.ResizeObserver) {
+            this._timelineResizeObserver = new ResizeObserver(() => {
+                // Only reposition if overlay is visible and not in fullscreen (render preview) mode
+                const overlay = this.modal.querySelector("[data-timeline-preview]");
+                if (overlay && overlay.classList.contains("visible") &&
+                    !overlay.classList.contains("fullscreen") && this._isPlaying &&
+                    !this._isPositioning) {
+                    this._isPositioning = true;
+                    this._positionTimelineOverlay();
+                    this._isPositioning = false;
+                }
+            });
+            this._timelineResizeObserver.observe(timelineSectionEl);
+            this._timelineResizeObserver.observe(modalEl);
+        }
+
         this.modal.querySelector('[data-act="close-preview"]').onclick = (e) => {
             e.stopPropagation();
             const overlay = this.modal.querySelector("[data-timeline-preview]");
@@ -1895,6 +1916,8 @@ class TimelineEditor {
             }
             this._previewVideoActive = false;
             this._previewZoom = 1;
+            this._previewAtPlayhead = false;
+            this._restoreTimelineLayout();
             this._stopPlayback();
         };
         this.modal.querySelector('[data-act="enlarge-preview"]').onclick = (e) => {
@@ -2133,16 +2156,25 @@ class TimelineEditor {
         if (rulerMarks) {
             rulerMarks.style.cursor = "pointer";
             rulerMarks.addEventListener("click", (e) => {
-                const rect = rulerMarks.getBoundingClientRect();
-                const x = e.clientX - rect.left;
+                // Use trackContainer's rect (already accounts for scroll) to get
+                // accurate click position, then subtract SPACER_W to get playhead time.
+                // This avoids double-counting scrollLeft.
+                const trackContainer = this.modal.querySelector("[data-track-container]");
+                const trackRect = trackContainer ? trackContainer.getBoundingClientRect() : null;
+                if (!trackRect) return;
+                const SPACER_W = 150;
                 const pps = this._pps || 15;
-                const scrollContainer = this.modal.querySelector("[data-timeline-scroll]");
-                const scrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
-                const totalX = x + scrollLeft;
-                this._playheadTime = totalX / pps;
+                const clickX = e.clientX - trackRect.left;
+                this._playheadTime = Math.max(0, (clickX - SPACER_W) / pps);
                 if (!this._isPlaying) {
-                    const inlineVideo = this.modal.querySelector(".bsai-pp-inline-video");
-                    if (inlineVideo) this._stopPlayback();
+                    // Clean up any previous playback/preview state, then show new preview
+                    if (this._previewAtPlayhead || this._previewVideoActive) {
+                        // Already in preview mode or render preview — just update content
+                    } else if (this._playClips.length > 0) {
+                        // Was playing before (paused) — stop and show fresh preview
+                        this._stopPlayback();
+                    }
+                    this._showPreviewAtPlayhead();
                 }
                 this._renderTimelinePlayhead();
                 if (this.scissorMode) {
@@ -2234,9 +2266,9 @@ class TimelineEditor {
         let savedOffset = null;
         if (wasPlaying) {
             savedClipIndex = this._playClipIndex;
-            const inlineVideo = this.modal.querySelector(".bsai-pp-inline-video");
-            if (inlineVideo && inlineVideo.tagName === "VIDEO" && inlineVideo.currentTime != null && !isNaN(inlineVideo.currentTime)) {
-                savedOffset = inlineVideo.currentTime;
+            const overlayVideo = this.modal.querySelector("[data-preview-video]");
+            if (overlayVideo && overlayVideo.src && overlayVideo.currentTime != null && !isNaN(overlayVideo.currentTime)) {
+                savedOffset = overlayVideo.currentTime;
             } else if (this._imageElapsed != null) {
                 const currentClip = this._playClips?.[this._playClipIndex];
                 savedOffset = currentClip ? (currentClip.trim_start || 0) + this._imageElapsed : null;
@@ -2292,6 +2324,8 @@ class TimelineEditor {
             this._pausedVideoTime = null;
             const btn = this.modal.querySelector("#bsai-pp-play-btn");
             if (btn) btn.textContent = "⏸️ 暂停";
+            // Show overlay for restored playback (constrained to timeline section)
+            this._positionTimelineOverlay();
             this._playNextClip();
         }
     }
@@ -2912,17 +2946,21 @@ class TimelineEditor {
         // Remove timeline playhead to avoid dual playheads during playback
         const tlPh = this.modal.querySelector(".bsai-pp-timeline-playhead");
         if (tlPh) tlPh.remove();
-        // If resuming from pause (inline video element still exists), just resume
-        if (!this._isPlaying && this._playClips.length > 0) {
-            const inlineVideo = this.modal.querySelector(".bsai-pp-inline-video");
-            if (inlineVideo) {
+        // If resuming from pause (overlay video or inline image still exists), just resume
+        // But NOT if we're in preview-at-playhead mode (need fresh start from playhead)
+        if (!this._isPlaying && this._playClips.length > 0 && !this._previewAtPlayhead) {
+            const overlayVideo = this.modal.querySelector("[data-preview-video]");
+            const inlineImage = this.modal.querySelector(".bsai-pp-inline-image");
+            if ((overlayVideo && overlayVideo.src) || inlineImage) {
+                // Show overlay for resume (constrained to timeline section)
+                this._positionTimelineOverlay();
                 this._isPlaying = true;
                 this._pausedClip = null;
                 this._pausedVideoTime = null;
                 const btn = this.modal.querySelector("#bsai-pp-play-btn");
                 if (btn) btn.textContent = "⏸️ 暂停";
-                if (inlineVideo.tagName === "VIDEO") {
-                    inlineVideo.play().catch(() => {});
+                if (overlayVideo && overlayVideo.src) {
+                    overlayVideo.play().catch(() => {});
                     const inlineAudio = this.modal.querySelector(".bsai-pp-inline-audio");
                     if (inlineAudio) inlineAudio.play().catch(() => {});
                 } else {
@@ -2940,9 +2978,12 @@ class TimelineEditor {
         this._playClips = videoClips;
         let startIdx = 0;
         this._playStartOffset = null;
-        // Priority 1: If playhead is set, find the clip at playhead position
+        // Sort videoClips by timeline start time to ensure correct playback order
+        videoClips.sort((a, b) => this._getClipStartTime(a) - this._getClipStartTime(b));
+        // Priority 1: If playhead is set, find the clip at or after playhead position
         if (this._playheadTime !== null && this._playheadTime !== undefined && isFinite(this._playheadTime)) {
             const phTime = this._playheadTime;
+            let foundInClip = false;
             for (let i = 0; i < videoClips.length; i++) {
                 const clip = videoClips[i];
                 const clipStart = this._getClipStartTime(clip);
@@ -2950,17 +2991,33 @@ class TimelineEditor {
                 const clipEnd = clipStart + clipDur;
                 if (phTime >= clipStart && phTime < clipEnd) {
                     const offset = (clip.trim_start || 0) + (phTime - clipStart);
-                    // Safety: if offset is too close to trimEnd, start from beginning
+                    // Safety: if offset is too close to trimEnd, start from next clip
                     if (offset < (clip.trim_end || 0) - 0.5) {
                         startIdx = i;
                         this._playStartOffset = offset;
+                    } else {
+                        // Too close to end, start from next clip
+                        if (i + 1 < videoClips.length) {
+                            startIdx = i + 1;
+                        }
                     }
+                    foundInClip = true;
+                    break;
+                }
+                // If playhead is before this clip, start from this clip
+                if (phTime < clipStart) {
+                    startIdx = i;
+                    foundInClip = true;
                     break;
                 }
             }
+            // If playhead is after all clips, start from last clip
+            if (!foundInClip && videoClips.length > 0) {
+                startIdx = videoClips.length - 1;
+            }
         }
-        // Priority 2: Fall back to selected clip
-        if (this._playStartOffset === null && this.selectedIndex >= 0 && this.td.clips[this.selectedIndex]) {
+        // Priority 2: Fall back to selected clip (only if playhead not set)
+        if (this._playheadTime === null && this.selectedIndex >= 0 && this.td.clips[this.selectedIndex]) {
             const selectedClip = this.td.clips[this.selectedIndex];
             if (selectedClip.track_type === "video" && selectedClip.video_enabled !== false) {
                 const foundIdx = videoClips.indexOf(selectedClip);
@@ -2971,10 +3028,80 @@ class TimelineEditor {
         this._isPlaying = true;
         this._pausedClip = null;
         this._pausedVideoTime = null;
+        this._previewAtPlayhead = false;
         const btn = this.modal.querySelector("#bsai-pp-play-btn");
         if (btn) btn.textContent = "⏸️ 暂停";
-        // Play inline on timeline - NO popup window
+        // Show timeline preview overlay for playback (constrained to timeline section)
+        this._positionTimelineOverlay();
         this._playNextClip();
+    }
+
+    _positionTimelineOverlay() {
+        const overlay = this.modal.querySelector("[data-timeline-preview]");
+        const timelineSection = this.modal.querySelector(".bsai-pp-timeline-section");
+        const editSection = this.modal.querySelector(".bsai-pp-edit-section");
+        const footerEl = this.modal.querySelector(".bsai-pp-footer");
+        const dividerEl = this.modal.querySelector("[data-divider]");
+        const modalEl = this.modal.querySelector(".bsai-pp-modal");
+        if (!overlay || !timelineSection || !editSection || !modalEl) return;
+        // Remove fullscreen class so inline styles take effect
+        overlay.classList.remove("fullscreen");
+        // During playback: minimize timeline, compact edit section, hide footer
+        if (!this._originalTimelineHeight) {
+            this._originalTimelineHeight = timelineSection.style.height || "";
+            this._originalTimelineFlex = timelineSection.style.flex || "";
+            this._originalEditMarginTop = editSection.style.marginTop || "";
+            this._originalEditHeight = editSection.style.height || "";
+            this._originalFooterDisplay = footerEl ? footerEl.style.display || "" : "";
+        }
+        // Minimize timeline to just show track headers
+        timelineSection.style.flex = "0 0 auto";
+        timelineSection.style.height = "20%";
+        // Compact edit section
+        editSection.style.marginTop = "auto";
+        editSection.style.height = "170px";
+        // Hide footer during playback (info shown in preview bar)
+        if (footerEl) footerEl.style.display = "none";
+        // Hide divider during playback
+        if (dividerEl) dividerEl.style.display = "none";
+        // getBoundingClientRect forces sync reflow so measurements are accurate
+        const modalRect = modalEl.getBoundingClientRect();
+        const tsRect = timelineSection.getBoundingClientRect();
+        const esRect = editSection.getBoundingClientRect();
+        const top = tsRect.bottom - modalRect.top;
+        const bottom = esRect.top - modalRect.top;
+        const height = bottom - top;
+        overlay.style.top = top + "px";
+        overlay.style.left = "0px";
+        overlay.style.width = modalRect.width + "px";
+        overlay.style.height = Math.max(0, height) + "px";
+        overlay.classList.add("visible");
+    }
+
+    _restoreTimelineLayout() {
+        const timelineSection = this.modal.querySelector(".bsai-pp-timeline-section");
+        const editSection = this.modal.querySelector(".bsai-pp-edit-section");
+        const footerEl = this.modal.querySelector(".bsai-pp-footer");
+        const dividerEl = this.modal.querySelector("[data-divider]");
+        if (timelineSection && this._originalTimelineHeight !== undefined) {
+            timelineSection.style.flex = this._originalTimelineFlex || "1";
+            timelineSection.style.height = this._originalTimelineHeight;
+            this._originalTimelineHeight = undefined;
+            this._originalTimelineFlex = undefined;
+        }
+        if (editSection && this._originalEditMarginTop !== undefined) {
+            editSection.style.marginTop = this._originalEditMarginTop;
+            this._originalEditMarginTop = undefined;
+        }
+        if (editSection && this._originalEditHeight !== undefined) {
+            editSection.style.height = this._originalEditHeight;
+            this._originalEditHeight = undefined;
+        }
+        if (footerEl && this._originalFooterDisplay !== undefined) {
+            footerEl.style.display = this._originalFooterDisplay;
+            this._originalFooterDisplay = undefined;
+        }
+        if (dividerEl) dividerEl.style.display = "";
     }
 
     _playNextClip() {
@@ -2991,20 +3118,31 @@ class TimelineEditor {
         // Safety: ensure minimum 0.1s duration to prevent instant-skip playback issues
         if (trimEnd <= trimStart) { clip.trim_end = trimStart + (clip.duration || 3); }
 
-        // Remove any previous inline video/image/audio
-        this.modal.querySelectorAll(".bsai-pp-inline-video").forEach(v => { v.pause?.(); v.remove(); });
+        // Clean up previous playback content
+        // Reset overlay video (don't remove it, just clean up for reuse)
+        const overlayVideo = this.modal.querySelector("[data-preview-video]");
+        if (overlayVideo) {
+            overlayVideo.pause();
+            overlayVideo.onended = null;
+            overlayVideo.ontimeupdate = null;
+            overlayVideo.onloadedmetadata = null;
+            overlayVideo.onerror = null;
+            overlayVideo.removeAttribute("src");
+            overlayVideo.load();
+        }
+        // Remove inline images and audios
         this.modal.querySelectorAll(".bsai-pp-inline-image").forEach(v => { v.remove(); });
         this.modal.querySelectorAll(".bsai-pp-inline-audio").forEach(v => { v.pause?.(); v.remove(); });
 
-        // Find the clip block element on the timeline
+        // Find the clip block element on the timeline (for scroll/playhead)
         const clipIdx = this.td.clips.indexOf(clip);
         const clipBlock = this.modal.querySelector(`[data-clip-idx="${clipIdx}"]`);
-        const thumbDiv = clipBlock?.querySelector(".bsai-pp-clip-thumb");
 
-        if (!thumbDiv) {
-            this._playClipIndex++;
-            this._playNextClip();
-            return;
+        // Show overlay for playback
+        const playbackOverlay = this.modal.querySelector("[data-timeline-preview]");
+        // Position overlay to cover timeline section area (not fullscreen)
+        if (playbackOverlay && !playbackOverlay.classList.contains("visible")) {
+            this._positionTimelineOverlay();
         }
 
         // Update playhead position
@@ -3021,10 +3159,13 @@ class TimelineEditor {
             }
 
             const img = document.createElement("img");
-            img.className = "bsai-pp-inline-image bsai-pp-inline-video";
+            img.className = "bsai-pp-inline-image";
             img.style.cssText = "width:100%;height:100%;object-fit:contain;position:absolute;top:0;left:0;background:#000;z-index:5;";
             img.src = `/bsai_premiere_pro/stream?file=${encodeURIComponent(filePath)}`;
-            thumbDiv.appendChild(img);
+            // Append image to overlay for large preview display
+            if (playbackOverlay) playbackOverlay.appendChild(img);
+            // Hide overlay video while showing image
+            if (overlayVideo) overlayVideo.style.display = "none";
 
             // Audio playback for image clips: find overlapping or linked audio
             let imgAudioEl = null;
@@ -3078,7 +3219,8 @@ class TimelineEditor {
                     if (gen !== this._playbackGen || !this._isPlaying) return;
                     if (imgAudioEl.paused) imgAudioEl.play().catch(() => {});
                 });
-                thumbDiv.appendChild(imgAudioEl);
+                if (playbackOverlay) playbackOverlay.appendChild(imgAudioEl);
+                else this.modal.appendChild(imgAudioEl);
                 imgAudioEl.play().catch(() => {});
             }
 
@@ -3128,10 +3270,14 @@ class TimelineEditor {
                 // Update _playheadTime so zoom centers on current playback position
                 const imgClipStart = this._getClipStartTime(clip);
                 this._playheadTime = imgClipStart + elapsed;
-                // Update footer
+                // Update footer and preview info
                 const footerInfo = this.modal.querySelector("[data-footer-info]");
                 if (footerInfo) {
                     footerInfo.textContent = `▶ ${clip.file_name || ""} | ${formatTime(elapsed)} / ${formatTime(clipDur)} | ${this._playClipIndex + 1}/${this._playClips.length}`;
+                }
+                const imgOvInfo = this.modal.querySelector("[data-preview-info]");
+                if (imgOvInfo) {
+                    imgOvInfo.textContent = `▶ ${clip.file_name || ""} | ${formatTime(elapsed)} / ${formatTime(clipDur)} | ${this._playClipIndex + 1}/${this._playClips.length}`;
                 }
                 requestAnimationFrame(animateImg);
             };
@@ -3144,12 +3290,19 @@ class TimelineEditor {
             return;
         }
 
-        // ── Video clip: create <video> element ──
+        // ── Video clip: use overlay <video> element ──
         const videoSrc = `/bsai_premiere_pro/stream?file=${encodeURIComponent(filePath)}`;
-        const video = document.createElement("video");
-        video.className = "bsai-pp-inline-video";
-        video.style.cssText = "width:100%;height:100%;object-fit:contain;position:absolute;top:0;left:0;background:#000;z-index:5;";
+        // Use the existing overlay video element instead of creating an inline one
+        const video = this.modal.querySelector("[data-preview-video]");
+        if (!video) { this._playClipIndex++; this._playNextClip(); return; }
+        // Show overlay video (may have been hidden by previous image clip)
+        video.style.display = "";
         video.src = videoSrc;
+        // Update preview info text
+        const previewInfo = this.modal.querySelector("[data-preview-info]");
+        if (previewInfo) {
+            previewInfo.textContent = `▶ ${clip.file_name || ""} (${this._playClipIndex + 1}/${this._playClips.length})`;
+        }
 
         // Determine audio playback strategy
         let separateAudioEl = null;
@@ -3220,8 +3373,11 @@ class TimelineEditor {
             });
         }
 
-        thumbDiv.appendChild(video);
-        if (separateAudioEl) thumbDiv.appendChild(separateAudioEl);
+        // Video is already in the overlay; append audio element to overlay or modal
+        if (separateAudioEl) {
+            if (playbackOverlay) playbackOverlay.appendChild(separateAudioEl);
+            else this.modal.appendChild(separateAudioEl);
+        }
 
         const posX = clip.pos_x ?? 0;
         const posY = clip.pos_y ?? 0;
@@ -3240,7 +3396,9 @@ class TimelineEditor {
             video.ontimeupdate = null;
             video.onloadedmetadata = null;
             video.pause();
-            video.remove();
+            // Don't remove the overlay video element, just clean up its src
+            video.removeAttribute("src");
+            video.load();
             if (separateAudioEl) { separateAudioEl.pause(); separateAudioEl.remove(); }
             this._playClipIndex++;
             this._playNextClip();
@@ -3317,10 +3475,14 @@ class TimelineEditor {
                 return;
             }
             this._animatePlayhead();
+            const elapsed = Math.max(0, video.currentTime - trimStart);
             const footerInfo = this.modal.querySelector("[data-footer-info]");
             if (footerInfo) {
-                const elapsed = Math.max(0, video.currentTime - trimStart);
                 footerInfo.textContent = `▶ ${clip.file_name || ""} | ${formatTime(elapsed)} / ${formatTime(clipDur)} | ${this._playClipIndex + 1}/${this._playClips.length}`;
+            }
+            const ovInfo = this.modal.querySelector("[data-preview-info]");
+            if (ovInfo) {
+                ovInfo.textContent = `▶ ${clip.file_name || ""} | ${formatTime(elapsed)} / ${formatTime(clipDur)} | ${this._playClipIndex + 1}/${this._playClips.length}`;
             }
         };
 
@@ -3342,18 +3504,24 @@ class TimelineEditor {
             for (const t of this._playTimeouts) clearTimeout(t);
             this._playTimeouts = [];
         }
-        const inlineVideo = this.modal.querySelector(".bsai-pp-inline-video");
-        if (inlineVideo) {
+        // Use overlay video for pause state tracking
+        const overlayVideo = this.modal.querySelector("[data-preview-video]");
+        const inlineImage = this.modal.querySelector(".bsai-pp-inline-image");
+        if (overlayVideo && overlayVideo.src) {
             const currentClip = this._playClips?.[this._playClipIndex];
             if (currentClip) {
                 this._pausedClip = currentClip;
-                if (inlineVideo.tagName === "VIDEO" && inlineVideo.currentTime != null) {
-                    this._pausedVideoTime = inlineVideo.currentTime;
-                } else if (this._imageElapsed != null) {
-                    this._pausedVideoTime = (currentClip.trim_start || 0) + this._imageElapsed;
+                if (overlayVideo.currentTime != null) {
+                    this._pausedVideoTime = overlayVideo.currentTime;
                 }
             }
-            if (inlineVideo.pause) inlineVideo.pause();
+            overlayVideo.pause();
+        } else if (inlineImage && this._imageElapsed != null) {
+            const currentClip = this._playClips?.[this._playClipIndex];
+            if (currentClip) {
+                this._pausedClip = currentClip;
+                this._pausedVideoTime = (currentClip.trim_start || 0) + this._imageElapsed;
+            }
         }
         const inlineAudio = this.modal.querySelector(".bsai-pp-inline-audio");
         if (inlineAudio) inlineAudio.pause();
@@ -3377,16 +3545,44 @@ class TimelineEditor {
             for (const t of this._playTimeouts) clearTimeout(t);
             this._playTimeouts = [];
         }
-        // Remove all inline videos and audio from clip blocks
-        this.modal.querySelectorAll(".bsai-pp-inline-video").forEach(v => { v.pause?.(); v.remove(); });
+        // Clean up overlay video only if not in render preview mode
+        // (_showPreview sets src before calling _stopPlayback, so don't clear it)
+        if (!this._previewVideoActive) {
+            const overlayVideo = this.modal.querySelector("[data-preview-video]");
+            if (overlayVideo) {
+                overlayVideo.pause();
+                overlayVideo.onended = null;
+                overlayVideo.ontimeupdate = null;
+                overlayVideo.onloadedmetadata = null;
+                overlayVideo.onerror = null;
+                overlayVideo.style.display = "";
+                overlayVideo.style.transform = "";
+                overlayVideo.removeAttribute("src");
+                overlayVideo.load();
+            }
+        }
+        // Remove inline audios and images
         this.modal.querySelectorAll(".bsai-pp-inline-audio").forEach(v => { v.pause?.(); v.remove(); });
         this.modal.querySelectorAll(".bsai-pp-inline-image").forEach(v => { v.remove(); });
         // Remove playhead
         this._removePlayhead();
         // Only hide timeline preview overlay if it was used for inline playback (not render preview)
         if (!this._previewVideoActive) {
-            this.modal.querySelector("[data-timeline-preview]")?.classList.remove("visible");
-            this.modal.querySelector("[data-timeline-preview]")?.classList.remove("fullscreen");
+            const tlOverlay = this.modal.querySelector("[data-timeline-preview]");
+            if (tlOverlay) {
+                tlOverlay.classList.remove("visible");
+                tlOverlay.classList.remove("fullscreen");
+                // Clear inline positioning styles so default CSS applies
+                tlOverlay.style.top = "";
+                tlOverlay.style.left = "";
+                tlOverlay.style.width = "";
+                tlOverlay.style.height = "";
+            }
+            // Restore timeline section to original height
+            this._restoreTimelineLayout();
+            // Clear preview info text
+            const stopInfo = this.modal.querySelector("[data-preview-info]");
+            if (stopInfo) stopInfo.textContent = "";
         }
         const btn = this.modal.querySelector("#bsai-pp-play-btn");
         if (btn) btn.textContent = "▶️ 播放";
@@ -3414,8 +3610,8 @@ class TimelineEditor {
     _animatePlayhead() {
         const playhead = this.modal.querySelector(".bsai-pp-playhead");
         if (!playhead || !this._isPlaying) return;
-        const videoEl = this.modal.querySelector(".bsai-pp-inline-video");
-        if (!videoEl) return;
+        const videoEl = this.modal.querySelector("[data-preview-video]");
+        if (!videoEl || !videoEl.src) return;
         const currentClip = this._playClips[this._playClipIndex];
         if (!currentClip) return;
         // Find the clip block's actual position in the DOM
@@ -3429,9 +3625,7 @@ class TimelineEditor {
         const blockLeft = blockRect.left - containerRect.left;
         const pps = this._pps || 15;
         const trimStart = currentClip.trim_start || 0;
-        const elapsedInClip = videoEl.tagName === "VIDEO"
-            ? Math.max(0, videoEl.currentTime - trimStart)
-            : (this._imageElapsed || 0);
+        const elapsedInClip = Math.max(0, videoEl.currentTime - trimStart);
         const x = blockLeft + elapsedInClip * pps;
         playhead.style.left = x + "px";
         // Update _playheadTime so zoom centers on current playback position
@@ -3469,6 +3663,89 @@ class TimelineEditor {
             }
         });
         container.appendChild(ph);
+    }
+
+    _showPreviewAtPlayhead() {
+        if (this._playheadTime === null || this._playheadTime === undefined) return;
+        const videoClips = (this.td.clips || [])
+            .filter(c => c.track_type === "video" && c.video_enabled !== false);
+        if (videoClips.length === 0) return;
+
+        const phTime = this._playheadTime;
+        let foundClip = null;
+        let seekOffset = 0;
+
+        for (const clip of videoClips) {
+            const clipStart = this._getClipStartTime(clip);
+            const clipDur = (clip.trim_end || 0) - (clip.trim_start || 0);
+            const clipEnd = clipStart + clipDur;
+            if (phTime >= clipStart && phTime < clipEnd) {
+                foundClip = clip;
+                seekOffset = (clip.trim_start || 0) + (phTime - clipStart);
+                break;
+            }
+        }
+
+        if (!foundClip) return;
+
+        const overlay = this.modal.querySelector("[data-timeline-preview]");
+        const video = this.modal.querySelector("[data-preview-video]");
+        if (!overlay || !video) return;
+
+        // Position overlay to timeline section area
+        this._positionTimelineOverlay();
+
+        // Remove any existing inline images from previous preview
+        this.modal.querySelectorAll(".bsai-pp-inline-image").forEach(v => { v.remove(); });
+
+        const filePath = foundClip.file_path || "";
+
+        if (foundClip.is_image) {
+            // Image clip: show as <img>
+            video.pause();
+            video.removeAttribute("src");
+            video.load();
+            video.style.display = "none";
+
+            const img = document.createElement("img");
+            img.className = "bsai-pp-inline-image";
+            img.style.cssText = "width:100%;height:100%;object-fit:contain;position:absolute;top:0;left:0;background:#000;z-index:5;";
+            img.src = `/bsai_premiere_pro/stream?file=${encodeURIComponent(filePath)}`;
+            overlay.appendChild(img);
+        } else {
+            // Video clip: show frame at seek position
+            video.style.display = "";
+            video.style.width = "100%";
+            video.style.height = "100%";
+            video.style.objectFit = "contain";
+            video.style.objectPosition = "center";
+            video.style.transform = `translate(${foundClip.pos_x || 0}%, ${foundClip.pos_y || 0}%)`;
+
+            video.pause();
+            video.onended = null;
+            video.ontimeupdate = null;
+            video.onloadedmetadata = null;
+            video.onerror = null;
+            video.src = `/bsai_premiere_pro/stream?file=${encodeURIComponent(filePath)}`;
+
+            // Seek to the playhead offset within the clip
+            video.onloadedmetadata = () => {
+                if (seekOffset > 0) {
+                    try { video.currentTime = Math.max(0, seekOffset); } catch {}
+                }
+                video.onloadedmetadata = null;
+            };
+        }
+
+        // Show preview info
+        const previewInfo = this.modal.querySelector("[data-preview-info]");
+        if (previewInfo) {
+            const clipIdx = videoClips.indexOf(foundClip);
+            previewInfo.textContent = `${foundClip.file_name || ""} | ${formatTime(phTime)} | ${clipIdx + 1}/${videoClips.length}`;
+        }
+
+        // Mark as preview mode (not playing)
+        this._previewAtPlayhead = true;
     }
 
     _getCurrentFps() {
