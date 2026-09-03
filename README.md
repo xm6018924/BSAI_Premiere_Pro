@@ -47,6 +47,13 @@
 | `pix_fmt` | 下拉选择 | `yuv420p` | 像素格式：yuv420p/yuv444p/yuv422p/rgb24/bgr0 |
 | `crf` | 浮点数 | `19` | 编码质量（0=无损，51=最差，建议18-23） |
 | `frame_rate` | 浮点数 | `24` | 输出帧率（1-120） |
+| `upscale_enable` | 布尔值 | `False` | 4K 超分高清修复总开关：开启后，合并输出前先对视频轨文件执行超分放大，最后再与音频轨合并 |
+| `upscale_model` | 下拉选择 | `realesr-general-x4v3.pth` | 超分放大模型（由 BSAI-H3-upscale-4K 插件提供）：FlashVSR / SeedVR2 / NVIDIA RTX VSR / DLSS 5 引擎、Topaz 生成式、Real-ESRGAN 系列，缺失自动静默下载 |
+| `upscale_scale` | 浮点数 | `4.0` | 放大倍数（1.0-8.0），4 = 4K 级 |
+| `upscale_tile_size` | 整数 | `0` | 超分分块大小：0 = 整帧快速路径（推荐），爆显存时改为正数分块 |
+| `upscale_batch` | 整数 | `4` | 超分批帧数：控制显存占用与速度 |
+| `upscale_detail` | 浮点数 | `0.5` | 细节增强强度（高清修复），0 = 关闭 |
+| `upscale_face` | 下拉选择 | `Off` | 人脸修复：Off / GFPGANv1.4 / CodeFormer / 小脸增强(CodeFormer)，H3 远景小脸模糊时开启 |
 
 ### 输入端口
 
@@ -287,6 +294,29 @@
 - 使用 FFmpeg `filter_complex concat` 替代 concat demuxer
 - 音频流通过 `aresample=async=1:first_pts=0` 对齐
 - 统一编码为 H.264/H.265 + AAC，确保拼接无闪烁/断音
+
+---
+
+## 4K 超分高清修复（Upscale 4K）
+
+在合并输出前，对**视频轨道上的文件**执行 AI 超分放大高清修复，修复完成后**最后再与音频轨道的音频合并**，输出完整的一个视音频文件。
+
+> 依赖：需同时安装 `BSAI-H3-upscale-4K` 插件（自动动态加载，未安装时开启超分会给出明确提示）。
+
+### 处理顺序（硬约束）
+1. 各视频轨片段拼接/叠加 → 得到视频轨成品
+2. **先**对视频轨成品执行所选模型的超分放大 + 高清修复（解码 → AI 超分 → 重新编码）
+3. **最后**与音频轨道的音频（amix）合并 → 输出完整视音频文件
+
+### 支持的超分能力（来自 BSAI-H3-upscale-4K）
+- **引擎档**：FlashVSR-v1.1 扩散视频超分 / SeedVR2 7B / NVIDIA RTX Video Super Res / DLSS 5 神经渲染超分
+- **生成式档**：Topaz 星光 2.6 / Topaz Astra
+- **像素档**：Real-ESRGAN（realesr-general-x4v3 / RealESRGAN_x4plus / RealESRGAN_x4plus_anime_6B 等，缺失自动静默下载）
+- 附带：光流时序一致性、多尺度细节增强、柔和度、人脸修复（GFPGAN / CodeFormer）
+
+### 低显存适配
+- 分块推理（`upscale_tile_size > 0`）+ 批帧控制（`upscale_batch`），峰值显存 ≈ 单块帧数
+- 超长视频按块流式解码/超分/编码，不把整段帧常驻内存
 
 ---
 

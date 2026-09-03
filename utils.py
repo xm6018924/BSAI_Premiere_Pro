@@ -77,6 +77,56 @@ def get_ffprobe():
     return FFPROBE_PATH
 
 
+# ---------------------------------------------------------------------------
+# BSAI-H3-upscale-4K 插件动态加载（用于合并输出前的 4K 超分高清修复）
+# 插件目录名含连字符无法直接 import，这里按文件路径动态加载其主模块。
+# ---------------------------------------------------------------------------
+_H3_UPSCALE_MOD = None
+
+
+def load_h3_upscale_module():
+    """Locate and import BSAI-H3-upscale-4K's main module (bsai_h3_upscale_4k.py)."""
+    global _H3_UPSCALE_MOD
+    if _H3_UPSCALE_MOD is not None:
+        return _H3_UPSCALE_MOD
+    try:
+        import folder_paths
+        bases = [str(p) for p in folder_paths.get_folder_paths("custom_nodes")]
+        bases.append(os.path.join(folder_paths.base_path, "custom_nodes"))
+    except Exception:
+        bases = [os.path.join(os.getcwd(), "ComfyUI", "custom_nodes")]
+    for base in bases:
+        cand = os.path.join(base, "BSAI-H3-upscale-4K", "bsai_h3_upscale_4k.py")
+        if os.path.isfile(cand):
+            try:
+                import importlib.util
+                spec = importlib.util.spec_from_file_location("bsai_h3_upscale_4k_pp", cand)
+                mod = importlib.util.module_from_spec(spec)
+                sys.modules["bsai_h3_upscale_4k_pp"] = mod
+                spec.loader.exec_module(mod)
+                _H3_UPSCALE_MOD = mod
+                return mod
+            except Exception as e:
+                print(f"[BSAI Premiere Pro] 加载 BSAI-H3-upscale-4K 失败: {e}")
+                return None
+    return None
+
+
+def get_upscale_model_list():
+    """Return the upscale model list from BSAI-H3-upscale-4K (engine + topaz + realesrgan)."""
+    mod = load_h3_upscale_module()
+    if mod is None:
+        return ["realesr-general-x4v3.pth", "RealESRGAN_x4plus.pth", "RealESRGAN_x4plus_anime_6B.pth"]
+    try:
+        engines = list(getattr(mod.BSAI_H3_Upscale4K, "ENGINE_OPTIONS", {}).keys())
+        topaz = list(getattr(mod.BSAI_H3_Upscale4K, "TOPAZ_OPTIONS", {}).keys())
+        models = mod.list_available_models()
+        return engines + topaz + models
+    except Exception as e:
+        print(f"[BSAI Premiere Pro] 读取超分模型列表失败: {e}")
+        return ["realesr-general-x4v3.pth", "RealESRGAN_x4plus.pth", "RealESRGAN_x4plus_anime_6B.pth"]
+
+
 def get_video_info(file_path):
     ffprobe = get_ffprobe()
     if not ffprobe or not os.path.exists(file_path):
@@ -823,8 +873,150 @@ def _mix_audio_tracks(track_files, temp_dir):
     return output_file
 
 
+def upscale_video_file(video_path, params, target_fps, temp_dir):
+    """视频轨 4K 超分高清修复：解码帧 -> 调用 BSAI-H3-upscale-4K 超分 -> 重新编码。
+
+    按块流式处理（每块 batch_frames 帧），内存占用 = 单块帧数，超长视频不爆显存/内存。
+    返回超分后的 mp4 绝对路径；失败抛出异常（由调用方包装为错误信息）。
+    """
+    import numpy as np
+    import torch
+    mod = load_h3_upscale_module()
+    if mod is None:
+        raise RuntimeError("未找到 BSAI-H3-upscale-4K 插件，无法执行 4K 超分，请先安装该插件")
+    if not params or not params.get("enable"):
+        raise RuntimeError("upscale disabled")
+    info = get_video_info(video_path)
+    if not info or info["width"] <= 0 or info["height"] <= 0:
+        raise RuntimeError(f"无法读取视频信息: {video_path}")
+    w, h = int(info["width"]), int(info["height"])
+    fps = float(info["fps"] or target_fps or 24.0)
+    ffmpeg = get_ffmpeg()
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg not found")
+
+    model_name = params.get("model_name", "realesr-general-x4v3.pth")
+    scale = float(params.get("scale", 4.0))
+    batch = max(1, int(params.get("batch_frames", 4)))
+    tile_size = int(params.get("tile_size", 0))
+    tile_pad = int(params.get("tile_pad", 16))
+    detail_amount = float(params.get("detail_amount", 0.5))
+    detail_radius = float(params.get("detail_radius", 1.8))
+    softness = float(params.get("softness", 0.10))
+    face_restore = params.get("face_restore", "Off")
+    use_fp16 = bool(params.get("use_fp16", True))
+
+    print(f"[BSAI Premiere Pro] 4K超分开始: {video_path} ({w}x{h}, {fps}fps), 模型={model_name}, 倍率={scale}x")
+
+    # 1) 解码为 raw rgb24 磁盘文件（避免常驻内存）
+    raw_path = os.path.join(temp_dir, "frames.rgb")
+    dec = [ffmpeg, "-y", "-loglevel", "error", "-i", video_path,
+           "-an", "-f", "rawvideo", "-pix_fmt", "rgb24", raw_path]
+    r = subprocess.run(dec, capture_output=True, encoding="utf-8", errors="replace", timeout=3600)
+    if r.returncode != 0:
+        raise RuntimeError(f"解码视频失败: {r.stderr[-1500:]}")
+    raw_bytes = os.path.getsize(raw_path)
+    n_frames = raw_bytes // (w * h * 3)
+    if n_frames <= 0:
+        raise RuntimeError("解码视频帧数为 0")
+
+    mm = np.memmap(raw_path, dtype=np.uint8, mode="r").reshape(n_frames, h, w, 3)
+
+    node = mod.BSAI_H3_Upscale4K()
+
+    def _upscale_chunk(chunk_np):
+        t = torch.from_numpy(chunk_np.astype(np.float32) / 255.0)
+        # 4K 插件时序 pass 需要 cv2 且批数>1，否则 lr_np 为空会崩溃 —— 防御性关闭
+        t_strength = 0.20 if (getattr(mod, "_HAS_CV2", False) and t.shape[0] > 1) else 0.0
+        out, _, _, _, _ = node.upscale(**{
+            "images / 图像": t,
+            "model_name / 模型": model_name,
+            "scale / 放大倍数": scale,
+            "tile_size / 分块大小": tile_size,
+            "tile_pad / 分块重叠": tile_pad,
+            "batch_frames / 批帧数": batch,
+            "use_fp16 / 半精度": use_fp16,
+            "use_compile / 编译加速": True,
+            "temporal_strength / 时序强度": t_strength,
+            "detail_amount / 细节强度": detail_amount,
+            "detail_radius / 细节半径": detail_radius,
+            "softness / 柔和度": softness,
+            "face_restore / 人脸修复": face_restore,
+            "face_det_conf / 检测置信度": 0.15,
+            "face_blend / 融合强度": 0.70,
+            "face_fidelity / 保真度": 0.60,
+            "detail_mode / 细节模式": "smart",
+            "dlss_style / DLSS风格": "Cinematic",
+            "dlss_intensity / DLSS强度": 1.0,
+            "dlss_detail / DLSS细节": 1.0,
+            "dlss_motion / DLSS光流": True,
+        })
+        return out
+
+    # 2) 先超分第一块以确定输出尺寸（yuv420p 需偶数宽高）
+    first_chunk = _upscale_chunk(np.asarray(mm[:batch]))
+    ow = int(first_chunk.shape[2])
+    oh = int(first_chunk.shape[1])
+    if ow % 2:
+        ow += 1
+    if oh % 2:
+        oh += 1
+
+    # 3) 打开编码器，流式写入超分帧
+    out_path = os.path.join(temp_dir, "upscaled.mp4")
+    enc = [
+        ffmpeg, "-y", "-loglevel", "error",
+        "-f", "rawvideo", "-pix_fmt", "rgb24",
+        "-s", f"{ow}x{oh}", "-r", str(fps), "-i", "-",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path,
+    ]
+    p = subprocess.Popen(enc, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.PIPE)
+
+    def _write_chunk(out_t):
+        arr = (out_t.cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+        if arr.shape[2] != ow or arr.shape[1] != oh:
+            pad = np.zeros((arr.shape[0], oh, ow, 3), dtype=np.uint8)
+            ph, pw = arr.shape[1], arr.shape[2]
+            pad[:, :ph, :pw] = arr
+            arr = pad
+        p.stdin.write(arr.tobytes())
+
+    try:
+        _write_chunk(first_chunk)
+        for i in range(batch, n_frames, batch):
+            chunk = np.asarray(mm[i:i + batch])
+            if len(chunk) == 0:
+                break
+            out = _upscale_chunk(chunk)
+            _write_chunk(out)
+            if i % (batch * 12) == 0:
+                print(f"[BSAI Premiere Pro] 4K超分进度: {min(i + batch, n_frames)}/{n_frames} 帧", flush=True)
+    finally:
+        try:
+            del mm
+        except Exception:
+            pass
+        try:
+            os.remove(raw_path)
+        except Exception:
+            pass
+        p.stdin.close()
+
+    p.wait(timeout=3600)
+    err = ""
+    if p.returncode != 0:
+        err = p.stderr.read().decode("utf-8", "replace")
+    if p.returncode != 0:
+        raise RuntimeError(f"超分后编码失败: {err[-1500:]}")
+    print(f"[BSAI Premiere Pro] 4K超分完成: {out_path} ({ow}x{oh})")
+    return out_path
+
+
 def process_and_merge(timeline_data, output_filename, format_str, pix_fmt,
-                      crf, frame_rate, default_transition, transition_duration):
+                      crf, frame_rate, default_transition, transition_duration,
+                      upscale_params=None):
     ffmpeg = get_ffmpeg()
     if not ffmpeg:
         return None, "ffmpeg not found"
@@ -902,13 +1094,14 @@ def process_and_merge(timeline_data, output_filename, format_str, pix_fmt,
             return _process_multitrack(
                 timeline_data, enabled_clips, temp_dir, output_path,
                 target_w, target_h, target_fps, crf, video_codec, pix_fmt,
-                default_transition, transition_duration, ffmpeg
+                default_transition, transition_duration, ffmpeg, upscale_params
             )
         else:
             return _process_legacy(
                 enabled_clips, temp_dir, output_path,
                 target_w, target_h, target_fps, crf, video_codec, pix_fmt,
-                default_transition, transition_duration, ffmpeg, align_mode
+                default_transition, transition_duration, ffmpeg, align_mode,
+                upscale_params
             )
     except Exception as e:
         return None, f"Error during processing: {str(e)}"
@@ -918,7 +1111,8 @@ def process_and_merge(timeline_data, output_filename, format_str, pix_fmt,
 
 def _process_legacy(enabled_clips, temp_dir, output_path,
                     target_w, target_h, target_fps, crf, video_codec, pix_fmt,
-                    default_transition, transition_duration, ffmpeg, align_mode="height"):
+                    default_transition, transition_duration, ffmpeg, align_mode="height",
+                    upscale_params=None):
     """Legacy mode: sequential concat with both video and audio from each clip."""
     processed_files = []
     for i, clip in enumerate(enabled_clips):
@@ -944,6 +1138,8 @@ def _process_legacy(enabled_clips, temp_dir, output_path,
         # Single clip: just copy/re-encode to output
         shutil.copy2(processed_files[0], output_path)
         print(f"[BSAI Premiere Pro] Single clip, copied -> {output_path}")
+        if upscale_params and os.path.exists(output_path):
+            return _upscale_legacy_output(output_path, upscale_params, target_fps, temp_dir, ffmpeg, output_path)
         return output_path, None
 
     concat_cmd = [ffmpeg, "-y", "-loglevel", "error"]
@@ -995,13 +1191,50 @@ def _process_legacy(enabled_clips, temp_dir, output_path,
         result = subprocess.run(fallback_cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
         if result.returncode != 0:
             return None, f"Failed to merge clips:\n{result.stderr}"
+    if upscale_params and os.path.exists(output_path):
+        return _upscale_legacy_output(output_path, upscale_params, target_fps, temp_dir, ffmpeg, output_path)
     print(f"[BSAI Premiere Pro] Output saved: {output_path}")
+    return output_path, None
+
+
+def _upscale_legacy_output(legacy_video, upscale_params, target_fps, temp_dir, ffmpeg, output_path):
+    """旧版合并模式：对已产出的视音频文件，先超分视频轨，再保留原音频流合成最终文件。"""
+    try:
+        audio_stream = os.path.join(temp_dir, "legacy_audio.m4a")
+        ex = [ffmpeg, "-y", "-loglevel", "error", "-i", legacy_video,
+              "-map", "0:a:0", "-c:a", "aac", "-b:a", "192k", audio_stream]
+        r = subprocess.run(ex, capture_output=True, encoding="utf-8", errors="replace", timeout=600)
+        has_audio = r.returncode == 0 and os.path.exists(audio_stream) and os.path.getsize(audio_stream) > 0
+    except Exception:
+        has_audio = False
+    up_video = upscale_video_file(legacy_video, upscale_params, target_fps, temp_dir)
+    if not os.path.exists(up_video):
+        return None, "4K超分后未生成视频文件"
+    if has_audio:
+        final_out = os.path.join(temp_dir, "legacy_final.mp4")
+        merge = [
+            ffmpeg, "-y", "-loglevel", "error",
+            "-i", up_video, "-i", audio_stream,
+            "-map", "0:v:0", "-map", "1:a:0",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+            "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart", "-shortest", final_out,
+        ]
+        r = subprocess.run(merge, capture_output=True, encoding="utf-8", errors="replace", timeout=600)
+        if r.returncode != 0:
+            return None, f"超分后合音频失败: {r.stderr[-1500:]}"
+        shutil.copy2(final_out, output_path)
+        print(f"[BSAI Premiere Pro] 旧版超分+合音频完成 -> {output_path}")
+    else:
+        shutil.copy2(up_video, output_path)
+        print(f"[BSAI Premiere Pro] 旧版超分完成（无音频）-> {output_path}")
     return output_path, None
 
 
 def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
                         target_w, target_h, target_fps, crf, video_codec, pix_fmt,
-                        default_transition, transition_duration, ffmpeg):
+                        default_transition, transition_duration, ffmpeg,
+                        upscale_params=None):
     """Multi-track mode: process video and audio tracks separately, then combine."""
     video_tracks = timeline_data.get("video_tracks", [])
     audio_tracks = timeline_data.get("audio_tracks", [])
@@ -1074,6 +1307,14 @@ def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
     final_audio = None
     if audio_track_files:
         final_audio = _mix_audio_tracks(audio_track_files, temp_dir)
+
+    # --- 4K 超分高清修复：先对视频轨文件超分，最后再与音频轨合并输出 ---
+    if final_video and upscale_params:
+        print(f"[BSAI Premiere Pro] 4K超分开启：先对视频轨执行超分高清修复，再与音频轨合并")
+        try:
+            final_video = upscale_video_file(final_video, upscale_params, target_fps, temp_dir)
+        except Exception as e:
+            return None, f"4K超分失败: {e}"
 
     # --- Combine final video and audio into output ---
     if final_video and final_audio:

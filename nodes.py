@@ -5,7 +5,7 @@ import traceback
 
 from .utils import (
     process_and_merge, get_video_info, scan_video_directory, format_time,
-    merge_image_audio_to_video,
+    merge_image_audio_to_video, get_upscale_model_list,
 )
 
 
@@ -53,6 +53,34 @@ class BSAIPremiereProTimeline:
                 "frame_rate": ("FLOAT", {
                     "default": 24, "min": 1, "max": 120, "step": 1,
                 }),
+                "upscale_enable": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "4K 超分高清修复：开启后，合并输出前先对视频轨文件执行超分放大，最后再与音频轨合并",
+                }),
+                "upscale_model": (get_upscale_model_list(), {
+                    "default": "realesr-general-x4v3.pth",
+                    "tooltip": "超分放大模型：由 BSAI-H3-upscale-4K 插件提供（引擎/生成式/Real-ESRGAN 模型），缺失会自动静默下载",
+                }),
+                "upscale_scale": ("FLOAT", {
+                    "default": 4.0, "min": 1.0, "max": 8.0, "step": 0.01,
+                    "tooltip": "放大倍数：4 = 4K 级",
+                }),
+                "upscale_tile_size": ("INT", {
+                    "default": 0, "min": 0, "max": 2048, "step": 16,
+                    "tooltip": "分块大小：0 = 整帧快速路径（RTX 30xx+ 推荐）；爆显存时改为正数分块",
+                }),
+                "upscale_batch": ("INT", {
+                    "default": 4, "min": 1, "max": 128, "step": 1,
+                    "tooltip": "超分批帧数：控制显存占用与速度",
+                }),
+                "upscale_detail": ("FLOAT", {
+                    "default": 0.5, "min": 0.0, "max": 1.5, "step": 0.05,
+                    "tooltip": "细节增强强度（高清修复）：0 = 关闭",
+                }),
+                "upscale_face": (["Off", "GFPGANv1.4", "CodeFormer", "小脸增强(CodeFormer)"], {
+                    "default": "Off",
+                    "tooltip": "人脸修复：H3 远景小脸模糊时开启",
+                }),
             },
             "optional": {
                 "image": ("IMAGE",),
@@ -72,7 +100,11 @@ class BSAIPremiereProTimeline:
 
     def render(self, watch_directory, auto_import, default_transition,
                transition_duration, output_filename, format,
-               pix_fmt, crf, frame_rate, image=None, audio=None, clip_videos=None, unique_id=None):
+               pix_fmt, crf, frame_rate,
+               upscale_enable=False, upscale_model="realesr-general-x4v3.pth",
+               upscale_scale=4.0, upscale_tile_size=0, upscale_batch=4,
+               upscale_detail=0.5, upscale_face="Off",
+               image=None, audio=None, clip_videos=None, unique_id=None):
 
         from .server import _timeline_store
         timeline_data = _timeline_store.get(unique_id, '{"clips":[],"known_files":[],"deleted_files":[],"directory_history":{}}')
@@ -266,9 +298,26 @@ class BSAIPremiereProTimeline:
                 ui["timeline_data"] = [json.dumps(data)]
             return {"result": ("",), "ui": ui}
 
+        upscale_params = None
+        if upscale_enable:
+            upscale_params = {
+                "enable": True,
+                "model_name": upscale_model,
+                "scale": upscale_scale,
+                "tile_size": upscale_tile_size,
+                "tile_pad": 16,
+                "batch_frames": upscale_batch,
+                "detail_amount": upscale_detail,
+                "detail_radius": 1.8,
+                "softness": 0.10,
+                "face_restore": upscale_face,
+                "use_fp16": True,
+            }
+            print(f"[BSAI Premiere Pro] 4K超分开启: 模型={upscale_model}, 倍率={upscale_scale}x, 人脸修复={upscale_face}")
+
         output_path, error = process_and_merge(
             data, output_filename, format, pix_fmt, crf, frame_rate,
-            default_transition, transition_duration
+            default_transition, transition_duration, upscale_params
         )
 
         if error:

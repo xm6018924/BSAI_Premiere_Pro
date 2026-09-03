@@ -1,0 +1,57 @@
+{
+  "last_node_id": 1,
+  "last_link_id": 0,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "BSAIPremiereProTimeline",
+      "pos": [
+        120,
+        160
+      ],
+      "size": [
+        420,
+        700
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "video_path",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "BSAIPremiereProTimeline"
+      },
+      "widgets_values": [
+        "output",
+        true,
+        "cut",
+        0.5,
+        "premiere_4k_output",
+        "video/h264-mp4",
+        "yuv420p",
+        19,
+        24,
+        true,
+        "realesr-general-x4v3.pth",
+        4.0,
+        0,
+        4,
+        0.5,
+        "Off"
+      ],
+      "title": "BSAI Premiere Pro 4K超分 示例"
+    }
+  ],
+  "links": [],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}
