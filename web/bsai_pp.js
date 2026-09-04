@@ -4728,6 +4728,18 @@ class TimelineEditor {
             const frameRate = this._getWidgetValue("frame_rate", 24);
             const defaultTrans = this._getWidgetValue("default_transition", "cut");
             const transDur = this._getWidgetValue("transition_duration", 0.5);
+            const upscaleEnable = this._getWidgetValue("upscale_enable", false);
+            const upscaleModel = this._getWidgetValue("upscale_model", "realesr-general-x4v3.pth");
+            const upscaleScale = this._getWidgetValue("upscale_scale", 4.0);
+            const upscaleTile = this._getWidgetValue("upscale_tile_size", 0);
+            const upscaleBatch = this._getWidgetValue("upscale_batch", 4);
+            const upscaleDetail = this._getWidgetValue("upscale_detail", 0.5);
+            const upscaleFace = this._getWidgetValue("upscale_face", "Off");
+            const _umW = this._getWidget("upscale_model");
+            const _umOpts = (_umW?.options?.values && _umW.options.values.length) ? _umW.options.values : [upscaleModel];
+            const upscaleModelOptions = _umOpts.map(m => `<option value="${escapeHtml(m)}" ${m === upscaleModel ? "selected" : ""}>${escapeHtml(m)}</option>`).join("");
+            const _faceOpts = ["Off", "GFPGANv1.4", "CodeFormer", "小脸增强(CodeFormer)"];
+            const upscaleFaceOptions = _faceOpts.map(f => `<option value="${escapeHtml(f)}" ${f === upscaleFace ? "selected" : ""}>${escapeHtml(f)}</option>`).join("");
             panel.innerHTML = `
                 <div class="bsai-pp-edit-row">
                     <label>输出文件名</label>
@@ -4748,6 +4760,26 @@ class TimelineEditor {
                     <span style="color:#4a90d9;font-size:13px;font-weight:600;">${videoClips.length} 个视频</span>
                     <label>总时长</label>
                     <span style="color:#4caf50;font-size:13px;font-weight:600;">${formatTime(totalDur)}</span>
+                </div>
+                <div class="bsai-pp-edit-row" style="margin-top:6px;padding-top:6px;border-top:1px dashed #3a3a3a;flex-wrap:wrap;">
+                    <label style="color:#e0b050;font-weight:700;">4K 超分高清修复</label>
+                    <label style="display:flex;align-items:center;gap:4px;"><input type="checkbox" data-global="upscale_enable" ${upscaleEnable ? "checked" : ""}> 启用</label>
+                </div>
+                <div class="bsai-pp-edit-row" style="flex-wrap:wrap;">
+                    <label>放大模型</label>
+                    <select data-global="upscale_model" style="flex:1;min-width:170px;max-width:250px;">${upscaleModelOptions}</select>
+                    <label>倍率</label>
+                    <input type="number" min="1" max="8" step="0.01" value="${upscaleScale}" data-global="upscale_scale" style="width:68px;" title="4 = 4K 级">
+                </div>
+                <div class="bsai-pp-edit-row" style="flex-wrap:wrap;">
+                    <label>分块</label>
+                    <input type="number" min="0" max="2048" step="16" value="${upscaleTile}" data-global="upscale_tile_size" style="width:68px;" title="0=整帧快速路径(RTX30xx+推荐)，爆显存时改为正数分块">
+                    <label>批帧</label>
+                    <input type="number" min="1" max="128" step="1" value="${upscaleBatch}" data-global="upscale_batch" style="width:68px;">
+                    <label>细节</label>
+                    <input type="number" min="0" max="1.5" step="0.05" value="${upscaleDetail}" data-global="upscale_detail" style="width:68px;">
+                    <label>人脸</label>
+                    <select data-global="upscale_face" style="width:130px;">${upscaleFaceOptions}</select>
                 </div>
                 <div class="bsai-pp-clip-actions">
                     <button class="bsai-pp-btn" data-act="scan">🔍 扫描目录</button>
