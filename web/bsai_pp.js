@@ -4181,6 +4181,9 @@ class TimelineEditor {
                 }
             }
         }
+        if (isVideo && clip.upscale_enable === true) {
+            badges += `<span class="bsai-pp-clip-badge" style="background:linear-gradient(135deg,#e0b050,#ff9800);color:#000;font-weight:700;border-radius:3px;padding:0 3px;" title="此片段已开启4K超分">4K</span>`;
+        }
         if (!isVideo) {
             if (clip.audio_replacement) badges += `<span class="bsai-pp-clip-badge audio-replaced">🎵</span>`;
             else if (!clip.audio_enabled) badges += `<span class="bsai-pp-clip-badge">🔇</span>`;
@@ -4774,6 +4777,9 @@ class TimelineEditor {
             const defaultTrans = this._getWidgetValue("default_transition", "cut");
             const transDur = this._getWidgetValue("transition_duration", 0.5);
             const upscaleEnable = this._getWidgetValue("upscale_enable", false);
+            // Clip-level upscale: if any video clip has upscale_enable, force global upscale on
+            const anyClipUpscale = (this.td.clips || []).some(c => c.track_type === "video" && c.upscale_enable === true);
+            const effectiveUpscaleEnable = upscaleEnable || anyClipUpscale;
             const upscaleModel = this._getWidgetValue("upscale_model", "realesr-general-x4v3.pth");
             const upscaleScale = this._getWidgetValue("upscale_scale", 4.0);
             const upscaleTile = this._getWidgetValue("upscale_tile_size", 0);
@@ -4808,7 +4814,7 @@ class TimelineEditor {
                 </div>
                 <div class="bsai-pp-edit-row" style="margin-top:6px;padding-top:6px;border-top:1px dashed #3a3a3a;flex-wrap:wrap;">
                     <label style="color:#e0b050;font-weight:700;">4K 超分高清修复</label>
-                    <label style="display:flex;align-items:center;gap:4px;"><input type="checkbox" data-global="upscale_enable" ${upscaleEnable ? "checked" : ""}> 启用</label>
+                    <label style="display:flex;align-items:center;gap:4px;"><input type="checkbox" data-global="upscale_enable" ${effectiveUpscaleEnable ? "checked" : ""}> 启用</label>
                 </div>
                 <div class="bsai-pp-edit-row" style="flex-wrap:wrap;">
                     <label>放大模型</label>
@@ -4930,6 +4936,8 @@ class TimelineEditor {
             <div class="bsai-pp-edit-row">
                 <label>视频启用</label>
                 <input type="checkbox" data-field="video_enabled" ${clip.video_enabled !== false ? "checked" : ""}>
+                <label style="color:#e0b050;font-weight:600;">🎞️ 4K超分</label>
+                <input type="checkbox" data-field="upscale_enable" ${clip.upscale_enable === true ? "checked" : ""} title="开启后渲染时对此片段单独执行AI超分放大">
                 <label>画面位置</label>
                 <span style="color:#888;font-size:11px;">X</span>
                 <input type="range" class="bsai-pp-pos-slider" min="-100" max="100" step="1" value="${posX}" data-field="pos_x">

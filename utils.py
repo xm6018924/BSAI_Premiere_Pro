@@ -655,7 +655,8 @@ def _generate_gap_filler(ffmpeg, output_file, duration, target_w, target_h, targ
 
 
 def _process_track_clips(clips, track_type, track_index, temp_dir, target_w, target_h, target_fps,
-                         default_transition, transition_duration, align_mode="height"):
+                         default_transition, transition_duration, align_mode="height",
+                         upscale_params=None):
     """Process all clips in a single track and concatenate them.
 
     Returns the path to the merged track file, or None on failure.
@@ -707,6 +708,15 @@ def _process_track_clips(clips, track_type, track_index, temp_dir, target_w, tar
         if result.returncode != 0:
             print(f"[BSAI Premiere Pro] Failed to process clip {i} in {track_type} track {track_index}:\n{result.stderr}")
             continue
+        # Clip-level 4K upscale: if this video clip has upscale_enable, upscale it individually
+        if track_type == "video" and upscale_params and clip.get('upscale_enable', False) and os.path.exists(output_file):
+            print(f"[BSAI Premiere Pro] 🎞️ Clip-level 4K超分: {clip.get('file_name', 'unknown')}")
+            up_file = upscale_video_file(output_file, upscale_params, target_fps, temp_dir)
+            if up_file and os.path.exists(up_file):
+                output_file = up_file
+                print(f"[BSAI Premiere Pro]   ✓ 超分完成: {os.path.basename(up_file)}")
+            else:
+                print(f"[BSAI Premiere Pro]   ⚠ 超分失败，使用原文件")
         processed_files.append(output_file)
         expected_end = max(expected_end, clip_start) + clip_dur
 
@@ -1128,6 +1138,15 @@ def _process_legacy(enabled_clips, temp_dir, output_path,
         result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
         if result.returncode != 0:
             return None, f"Failed to process clip {i} ({clip.get('file_name', '')}):\n{result.stderr}"
+        # Clip-level 4K upscale: if this clip has upscale_enable, upscale it individually before merge
+        if upscale_params and clip.get('upscale_enable', False) and os.path.exists(output_file):
+            print(f"[BSAI Premiere Pro] 🎞️ Clip-level 4K超分: {clip.get('file_name', 'unknown')}")
+            up_file = upscale_video_file(output_file, upscale_params, target_fps, temp_dir)
+            if up_file and os.path.exists(up_file):
+                output_file = up_file
+                print(f"[BSAI Premiere Pro]   ✓ 超分完成: {os.path.basename(up_file)}")
+            else:
+                print(f"[BSAI Premiere Pro]   ⚠ 超分失败，使用原文件")
         processed_files.append(output_file)
     if not processed_files:
         return None, "No clips were successfully processed"
@@ -1263,7 +1282,8 @@ def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
         merged = _process_track_clips(
             track_clips, "video", ti, temp_dir,
             target_w, target_h, int(target_fps),
-            default_transition, transition_duration, align_mode
+            default_transition, transition_duration, align_mode,
+            upscale_params
         )
         if merged:
             video_track_files.append(merged)
