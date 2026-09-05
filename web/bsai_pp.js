@@ -1668,6 +1668,7 @@ class TimelineEditor {
                     <button class="bsai-pp-btn" data-act="add-atrack">＋ 音频轨道</button>
                     <button class="bsai-pp-btn bsai-pp-btn-danger" data-act="clear-all">🗑 清空全部</button>
                     <button class="bsai-pp-btn" data-act="batch-select" id="bsai-pp-batch-btn">☑ 批量选择</button>
+                    <button class="bsai-pp-btn" data-act="upscale-toggle" id="bsai-pp-upscale-btn" title="4K超分高清修复总开关：开启后渲染输出前自动对视频轨执行AI超分放大">🎞️ 4K超分: 关</button>
                     <label>对齐</label>
                     <select class="bsai-pp-align-select" data-act="align-mode" title="横竖屏对齐方式">
                         <option value="height">高度对齐</option>
@@ -2114,6 +2115,7 @@ class TimelineEditor {
         this.modal.querySelector('[data-act="add-atrack"]').onclick = () => this._addAudioTrack();
         this.modal.querySelector('[data-act="clear-all"]').onclick = () => this._clearAllClips();
         this.modal.querySelector('[data-act="batch-select"]').onclick = () => this._toggleBatchMode();
+        this.modal.querySelector('[data-act="upscale-toggle"]').onclick = () => this._toggleUpscale();
         this.modal.querySelector('[data-act="render"]').onclick = () => this._renderVideo();
     }
 
@@ -2121,6 +2123,7 @@ class TimelineEditor {
         this._renderTimeline();
         this._renderEditPanel();
         this._renderFooter();
+        this._updateUpscaleBtn();
         this._loadThumbnails();
     }
 
@@ -3939,6 +3942,25 @@ class TimelineEditor {
         }
         this._renderTimeline();
         if (this.batchMode) this._renderBatchBar();
+    }
+
+    _toggleUpscale() {
+        const cur = this._getWidgetValue("upscale_enable", false);
+        this._setWidgetValue("upscale_enable", !cur);
+        this._updateUpscaleBtn();
+        this._renderEditPanel();
+        this._save();
+        this._toast(!cur ? "4K超分已开启（渲染时自动高清修复）" : "4K超分已关闭", !cur ? "success" : "info");
+    }
+
+    _updateUpscaleBtn() {
+        const btn = this.modal.querySelector("#bsai-pp-upscale-btn");
+        if (!btn) return;
+        const enabled = this._getWidgetValue("upscale_enable", false);
+        btn.textContent = enabled ? "🎞️ 4K超分: 开" : "🎞️ 4K超分: 关";
+        btn.style.background = enabled ? "#1b5e20" : "#3a3a3a";
+        btn.style.borderColor = enabled ? "#4caf50" : "#555";
+        btn.style.color = enabled ? "#a5d6a7" : "#ddd";
     }
 
     _renderBatchBar() {
