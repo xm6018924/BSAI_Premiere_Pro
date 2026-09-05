@@ -1399,20 +1399,39 @@ def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
 
 
 def save_image_tensor(tensor, output_path):
-    """Save a PyTorch image tensor (B,H,W,C or H,W,C) as PNG."""
+    """Save a PyTorch image tensor (B,H,W,C / H,W,C / H,W / C,H,W) as PNG."""
     import numpy as np
     try:
         from PIL import Image
     except ImportError:
         return False
     try:
-        arr = tensor.cpu().numpy()
+        arr = tensor.detach().cpu().numpy()
     except Exception:
         return False
     if arr.ndim == 4:
         arr = arr[0]
-    arr = (arr * 255).clip(0, 255).astype(np.uint8)
+    if arr.ndim == 3:
+        h, w, c = arr.shape
+        if c in (1, 3, 4) and h >= 8 and w >= 8:   # HWC
+            if c == 1:
+                arr = arr[:, :, 0]
+        elif h in (1, 3, 4) and c >= 8 and w >= 8:  # CHW -> HWC
+            arr = np.transpose(arr, (1, 2, 0))
+            if arr.shape[2] == 1:
+                arr = arr[:, :, 0]
+        else:
+            print(f"[BSAI Premiere Pro] image 张量形状 {arr.shape} 不是有效图像帧（期望 H,W,C；C∈{{1,3,4}}）。"
+                  "检查 IMAGE 输入是否接到了视频帧输出（如 H3 Extender 的 images）；"
+                  "若要把生成片段加入时间线请接 clip_videos 端口（H3 Extender 的 clip_videos 输出）。")
+            return False
+    elif arr.ndim == 2:
+        pass
+    else:
+        print(f"[BSAI Premiere Pro] image 张量形状 {arr.shape} 无法保存为图像。")
+        return False
     try:
+        arr = (arr * 255).clip(0, 255).astype(np.uint8)
         Image.fromarray(arr).save(output_path)
         return True
     except Exception as e:

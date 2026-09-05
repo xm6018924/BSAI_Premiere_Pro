@@ -490,6 +490,14 @@ const STYLES = `
 .bsai-pp-history-item .hist-clips { color: #666; font-size: 10px; margin-left: auto; }
 .bsai-pp-history-item .hist-del { color: #d35454; cursor: pointer; padding: 2px 4px; }
 .bsai-pp-history-item .hist-del:hover { background: #d35454; color: #fff; border-radius: 3px; }
+
+.bsai-pp-ctx-menu { position: fixed; z-index: 99999; min-width: 200px; background: #2a2a2a; border: 1px solid #444; border-radius: 6px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); padding: 4px 0; font-size: 13px; color: #ddd; user-select: none; }
+.bsai-pp-ctx-menu .ctx-item { padding: 8px 14px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.bsai-pp-ctx-menu .ctx-item:hover { background: #3a3a3a; color: #fff; }
+.bsai-pp-ctx-menu .ctx-item.danger { color: #ff6b6b; }
+.bsai-pp-ctx-menu .ctx-item.danger:hover { background: #4a2020; }
+.bsai-pp-ctx-menu .ctx-sep { height: 1px; background: #444; margin: 4px 0; }
+.bsai-pp-ctx-menu .ctx-icon { width: 16px; text-align: center; }
 `;
 
 // Inject styles immediately so directory browser dialog has CSS
@@ -2425,6 +2433,11 @@ class TimelineEditor {
             }
         }
         row.appendChild(content);
+        // Right-click context menu on track content (close gaps / delete)
+        content.addEventListener("contextmenu", (e) => {
+            if (e.target.closest("[data-clip-idx]")) return; // clip handles its own
+            this._showTimelineContextMenu(e, trackType, trackIndex);
+        });
         // Allow dropping clips onto track content (for empty tracks or free positioning)
         content.addEventListener("dragover", (e) => {
             if (!this._dragData) return;
@@ -4222,6 +4235,16 @@ class TimelineEditor {
                 e.stopPropagation();
             }
         };
+        // Right-click on clip: select it then show context menu (close gaps / delete)
+        block.oncontextmenu = (e) => {
+            e.stopPropagation();
+            if (!this.boxSelected.has(clipIndex)) {
+                this.selectedIndex = clipIndex;
+                this.boxSelected.clear();
+                this._renderTimeline();
+            }
+            this._showTimelineContextMenu(e, clip.track_type, clip.track_index);
+        };
         // Add resize handles for trim (not on locked tracks)
         if (!this.batchMode && !this.scissorMode && !isLocked) {
             const leftHandle = document.createElement("div");
@@ -5560,29 +5583,104 @@ class TimelineEditor {
         this._renderAll();
     }
 
-    _rippleDeleteShift(deletedClipsInfo) {
-        const byTrack = new Map();
-        for (const dc of deletedClipsInfo) {
-            const key = `${dc.track_type}:${dc.track_index}`;
-            if (!byTrack.has(key)) byTrack.set(key, []);
-            byTrack.get(key).push(dc);
+    _closeGapsOnTrack(trackType, trackIndex) {
+        // Close all gaps on a track: clips snap tight against each other.
+        // First clip keeps its position; subsequent clips start where the previous ends.
+        const clips = this.td.clips.filter(c => c.track_type === trackType && c.track_index === trackIndex);
+        if (clips.length <= 1) return 0;
+        clips.sort((a, b) => this._getClipStartTime(a) - this._getClipStartTime(b));
+        let cursor = this._getClipStartTime(clips[0]);
+        let moved = 0;
+        for (const clip of clips) {
+            const dur = (clip.trim_end || clip.duration || 0) - (clip.trim_start || 0);
+            const curStart = this._getClipStartTime(clip);
+            if (Math.abs(curStart - cursor) > 0.001) {
+                clip.start_time = cursor;
+                moved++;
+            }
+            cursor += dur;
         }
-        for (const [key, deletedList] of byTrack) {
-            const parts = key.split(':');
-            const trackType = parts[0];
-            const trackIndex = parseInt(parts[1]);
-            deletedList.sort((a, b) => a.start_time - b.start_time);
-            for (const dc of deletedList) {
-                const shift = dc.end_time - dc.start_time;
-                if (shift <= 0) continue;
-                for (const clip of this.td.clips) {
-                    if (clip.track_type !== trackType || clip.track_index !== trackIndex) continue;
-                    if (typeof clip.start_time !== 'number') continue;
-                    if (clip.start_time >= dc.end_time) {
-                        clip.start_time -= shift;
+        return moved;
+    }
+
+    _closeAllGaps() {
+        const tracks = new Set();
+        for (const c of this.td.clips) tracks.add(`${c.track_type}:${c.track_index}`);
+        let total = 0;
+        for (const key of tracks) {
+            const [tt, ti] = key.split(':');
+            total += this._closeGapsOnTrack(tt, parseInt(ti));
+        }
+        return total;
+    }
+
+    _rippleDeleteShift(deletedClipsInfo) {
+        // After deleting clips, close all gaps on every affected track so
+        // remaining clips snap tight against each other (no leftover empty space).
+        const tracks = new Set();
+        for (const dc of deletedClipsInfo) tracks.add(`${dc.track_type}:${dc.track_index}`);
+        for (const key of tracks) {
+            const [tt, ti] = key.split(':');
+            this._closeGapsOnTrack(tt, parseInt(ti));
+        }
+    }
+
+    _showTimelineContextMenu(e, trackType, trackIndex) {
+        e.preventDefault();
+        e.stopPropagation();
+        this._closeContextMenu();
+        const menu = document.createElement('div');
+        menu.className = 'bsai-pp-ctx-menu';
+        menu.style.left = e.clientX + 'px';
+        menu.style.top = e.clientY + 'px';
+        const trackLabel = trackType === 'video' ? '视频轨道' : '音频轨道';
+        menu.innerHTML = `
+            <div class="ctx-item" data-act="close-gap-track"><span class="ctx-icon">⇤</span>闭合当前轨道空隙（${trackLabel}）</div>
+            <div class="ctx-item" data-act="close-gap-all"><span class="ctx-icon">⇤</span>闭合所有轨道空隙</div>
+            <div class="ctx-sep"></div>
+            <div class="ctx-item danger" data-act="delete-selected"><span class="ctx-icon">🗑</span>删除选中片段</div>
+        `;
+        document.body.appendChild(menu);
+        menu.querySelectorAll('.ctx-item').forEach(item => {
+            item.onclick = (ev) => {
+                ev.stopPropagation();
+                const act = item.getAttribute('data-act');
+                this._closeContextMenu();
+                if (act === 'close-gap-track') {
+                    const n = this._closeGapsOnTrack(trackType, trackIndex);
+                    this._save(); this._renderAll();
+                    this._toast(n > 0 ? `已闭合 ${trackLabel}，移动 ${n} 个片段` : `${trackLabel} 无需闭合`, n > 0 ? 'success' : 'info');
+                } else if (act === 'close-gap-all') {
+                    const n = this._closeAllGaps();
+                    this._save(); this._renderAll();
+                    this._toast(n > 0 ? `已闭合所有轨道，共移动 ${n} 个片段` : '所有轨道已对齐，无需闭合', n > 0 ? 'success' : 'info');
+                } else if (act === 'delete-selected') {
+                    if (this.boxSelected.size > 0) {
+                        this._deleteBoxSelected();
+                    } else if (this.selectedIndex >= 0) {
+                        this._deleteClip(this.selectedIndex);
+                    } else {
+                        this._toast('未选中任何片段', 'info');
                     }
                 }
-            }
+            };
+        });
+        this._ctxMenu = menu;
+        const closeHandler = (ev) => {
+            if (menu && !menu.contains(ev.target)) this._closeContextMenu();
+        };
+        setTimeout(() => document.addEventListener('mousedown', closeHandler), 10);
+        this._ctxMenuCloseHandler = closeHandler;
+    }
+
+    _closeContextMenu() {
+        if (this._ctxMenu) {
+            this._ctxMenu.remove();
+            this._ctxMenu = null;
+        }
+        if (this._ctxMenuCloseHandler) {
+            document.removeEventListener('mousedown', this._ctxMenuCloseHandler);
+            this._ctxMenuCloseHandler = null;
         }
     }
 
