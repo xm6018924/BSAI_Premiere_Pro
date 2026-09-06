@@ -299,9 +299,12 @@ class BSAIPremiereProTimeline:
             return {"result": ("",), "ui": ui}
 
         upscale_params = None
-        if upscale_enable:
+        # Check if any clip has clip-level upscale enabled
+        _clips_for_upscale = data.get('clips', []) if isinstance(data, dict) else []
+        _any_clip_upscale = any(c.get('upscale_enable', False) for c in _clips_for_upscale)
+        if upscale_enable or _any_clip_upscale:
             upscale_params = {
-                "enable": True,
+                "enable": upscale_enable,
                 "model_name": upscale_model,
                 "scale": upscale_scale,
                 "tile_size": upscale_tile_size,
@@ -313,7 +316,10 @@ class BSAIPremiereProTimeline:
                 "face_restore": upscale_face,
                 "use_fp16": True,
             }
-            print(f"[BSAI Premiere Pro] 4K超分开启: 模型={upscale_model}, 倍率={upscale_scale}x, 人脸修复={upscale_face}")
+            if upscale_enable:
+                print(f"[BSAI Premiere Pro] 4K超分开启: 模型={upscale_model}, 倍率={upscale_scale}x, 人脸修复={upscale_face}")
+            if _any_clip_upscale:
+                print(f"[BSAI Premiere Pro] 🎞️ 检测到片段级超分，已启用超分参数（全局超分={'开' if upscale_enable else '关'}）")
 
         output_path, error = process_and_merge(
             data, output_filename, format, pix_fmt, crf, frame_rate,

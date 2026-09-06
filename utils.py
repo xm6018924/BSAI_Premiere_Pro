@@ -1169,7 +1169,7 @@ def _process_legacy(enabled_clips, temp_dir, output_path,
         # Single clip: just copy/re-encode to output
         shutil.copy2(processed_files[0], output_path)
         print(f"[BSAI Premiere Pro] Single clip, copied -> {output_path}")
-        if upscale_params and os.path.exists(output_path):
+        if upscale_params and upscale_params.get('enable', False) and os.path.exists(output_path):
             return _upscale_legacy_output(output_path, upscale_params, target_fps, temp_dir, ffmpeg, output_path)
         return output_path, None
 
@@ -1222,7 +1222,7 @@ def _process_legacy(enabled_clips, temp_dir, output_path,
         result = subprocess.run(fallback_cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
         if result.returncode != 0:
             return None, f"Failed to merge clips:\n{result.stderr}"
-    if upscale_params and os.path.exists(output_path):
+    if upscale_params and upscale_params.get('enable', False) and os.path.exists(output_path):
         return _upscale_legacy_output(output_path, upscale_params, target_fps, temp_dir, ffmpeg, output_path)
     print(f"[BSAI Premiere Pro] Output saved: {output_path}")
     return output_path, None
@@ -1341,7 +1341,7 @@ def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
         final_audio = _mix_audio_tracks(audio_track_files, temp_dir)
 
     # --- 4K 超分高清修复：先对视频轨文件超分，最后再与音频轨合并输出 ---
-    if final_video and upscale_params:
+    if final_video and upscale_params and upscale_params.get('enable', False):
         print(f"[BSAI Premiere Pro] 4K超分开启：先对视频轨执行超分高清修复，再与音频轨合并")
         try:
             final_video = upscale_video_file(final_video, upscale_params, target_fps, temp_dir)
