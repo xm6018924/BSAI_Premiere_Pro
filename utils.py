@@ -710,8 +710,14 @@ def _process_track_clips(clips, track_type, track_index, temp_dir, target_w, tar
             continue
         # Clip-level 4K upscale: if this video clip has upscale_enable, upscale it individually
         if track_type == "video" and upscale_params and clip.get('upscale_enable', False) and os.path.exists(output_file):
-            print(f"[BSAI Premiere Pro] 🎞️ Clip-level 4K超分: {clip.get('file_name', 'unknown')}")
-            up_file = upscale_video_file(output_file, upscale_params, target_fps, temp_dir)
+            clip_model = clip.get('upscale_model', '')
+            clip_upscale_params = dict(upscale_params)
+            if clip_model:
+                clip_upscale_params['model_name'] = clip_model
+                print(f"[BSAI Premiere Pro] 🎞️ Clip-level 4K超分: {clip.get('file_name', 'unknown')} (模型: {clip_model})")
+            else:
+                print(f"[BSAI Premiere Pro] 🎞️ Clip-level 4K超分: {clip.get('file_name', 'unknown')} (使用全局模型)")
+            up_file = upscale_video_file(output_file, clip_upscale_params, target_fps, temp_dir)
             if up_file and os.path.exists(up_file):
                 output_file = up_file
                 print(f"[BSAI Premiere Pro]   ✓ 超分完成: {os.path.basename(up_file)}")
@@ -1140,8 +1146,14 @@ def _process_legacy(enabled_clips, temp_dir, output_path,
             return None, f"Failed to process clip {i} ({clip.get('file_name', '')}):\n{result.stderr}"
         # Clip-level 4K upscale: if this clip has upscale_enable, upscale it individually before merge
         if upscale_params and clip.get('upscale_enable', False) and os.path.exists(output_file):
-            print(f"[BSAI Premiere Pro] 🎞️ Clip-level 4K超分: {clip.get('file_name', 'unknown')}")
-            up_file = upscale_video_file(output_file, upscale_params, target_fps, temp_dir)
+            clip_model = clip.get('upscale_model', '')
+            clip_upscale_params = dict(upscale_params)
+            if clip_model:
+                clip_upscale_params['model_name'] = clip_model
+                print(f"[BSAI Premiere Pro] 🎞️ Clip-level 4K超分: {clip.get('file_name', 'unknown')} (模型: {clip_model})")
+            else:
+                print(f"[BSAI Premiere Pro] 🎞️ Clip-level 4K超分: {clip.get('file_name', 'unknown')} (使用全局模型)")
+            up_file = upscale_video_file(output_file, clip_upscale_params, target_fps, temp_dir)
             if up_file and os.path.exists(up_file):
                 output_file = up_file
                 print(f"[BSAI Premiere Pro]   ✓ 超分完成: {os.path.basename(up_file)}")
@@ -1438,6 +1450,10 @@ def save_image_tensor(tensor, output_path):
                 arr = arr[:, :, 0]
         elif h in (1, 3, 4) and c >= 8 and w >= 8:  # CHW -> HWC
             arr = np.transpose(arr, (1, 2, 0))
+            if arr.shape[2] == 1:
+                arr = arr[:, :, 0]
+        elif w in (1, 3, 4) and h >= 8 and c >= 8:  # WCH (e.g. H3 Extender images) -> HWC
+            arr = np.transpose(arr, (2, 0, 1))
             if arr.shape[2] == 1:
                 arr = arr[:, :, 0]
         else:

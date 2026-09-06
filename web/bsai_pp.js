@@ -4938,6 +4938,11 @@ class TimelineEditor {
                 <input type="checkbox" data-field="video_enabled" ${clip.video_enabled !== false ? "checked" : ""}>
                 <label style="color:#e0b050;font-weight:600;">🎞️ 4K超分</label>
                 <input type="checkbox" data-field="upscale_enable" ${clip.upscale_enable === true ? "checked" : ""} title="开启后渲染时对此片段单独执行AI超分放大">
+                <label style="color:#e0b050;font-size:11px;">模型</label>
+                <select data-field="upscale_model" style="flex:1;min-width:120px;max-width:200px;font-size:11px;" title="此片段单独使用的超分模型，留空=使用全局设置">
+                    <option value="">(使用全局模型)</option>
+                    ${(this._getWidget("upscale_model")?.options?.values || ["realesr-general-x4v3.pth","RealESRGAN_x4plus.pth","RealESRGAN_x4plus_anime_6B.pth"]).map(m => `<option value="${escapeHtml(m)}" ${clip.upscale_model === m ? "selected" : ""}>${escapeHtml(m)}</option>`).join("")}
+                </select>
                 <label>画面位置</label>
                 <span style="color:#888;font-size:11px;">X</span>
                 <input type="range" class="bsai-pp-pos-slider" min="-100" max="100" step="1" value="${posX}" data-field="pos_x">
