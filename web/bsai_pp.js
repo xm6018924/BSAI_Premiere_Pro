@@ -3885,7 +3885,7 @@ class TimelineEditor {
         const idx = sameTrack.indexOf(clip);
         let startTime = 0;
         for (let i = 0; i < idx; i++) {
-            startTime += (sameTrack[i].trim_end - sameTrack[i].trim_start);
+            startTime += ((sameTrack[i].trim_end || sameTrack[i].duration || 0) - (sameTrack[i].trim_start || 0));
         }
         return startTime;
     }
@@ -5614,12 +5614,11 @@ class TimelineEditor {
     }
 
     _closeGapsOnTrack(trackType, trackIndex) {
-        // Close all gaps on a track: clips snap tight against each other.
-        // First clip keeps its position; subsequent clips start where the previous ends.
+        // Close all gaps on a track: clips snap tight against each other, starting from 0.
         const clips = this.td.clips.filter(c => c.track_type === trackType && c.track_index === trackIndex);
-        if (clips.length <= 1) return 0;
+        if (clips.length === 0) return 0;
         clips.sort((a, b) => this._getClipStartTime(a) - this._getClipStartTime(b));
-        let cursor = this._getClipStartTime(clips[0]);
+        let cursor = 0;
         let moved = 0;
         for (const clip of clips) {
             const dur = (clip.trim_end || clip.duration || 0) - (clip.trim_start || 0);
@@ -6005,6 +6004,83 @@ function _registerBsaiPP() {
     try {
     const _bsaiExt = {
     name: "BSAI.PremierePro",
+
+    setup() {
+        // Listen for H3 Film Factory per-clip WebSocket push.
+        // When a clip finishes, H3 sends h3_extender_clip_av with video_path.
+        // We auto-import that video into every BSAI Premiere Pro node on the canvas.
+        const _onH3ClipAv = (event) => {
+            try {
+                const detail = event.detail || event;
+                const videoPath = detail?.video_path;
+                const clipName = detail?.clip_name || "";
+                if (!videoPath) return;
+
+                // Find all BSAI Premiere Pro nodes on canvas
+                const ppNodes = (app.graph?._nodes || app.graph?.nodes || [])
+                    .filter(n => n.type === "BSAIPremiereProTimeline");
+                if (ppNodes.length === 0) return;
+
+                ppNodes.forEach(async (node) => {
+                    try {
+                        const resp = await api.fetchApi("/bsai_premiere_pro/add_clip", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                node_id: String(node.id),
+                                file_path: videoPath,
+                                clip_name: clipName,
+                            }),
+                        });
+                        const result = await resp.json();
+                        if (result?.ok) {
+                            console.log(`[BSAI Premiere Pro] auto-imported clip from H3: ${clipName || videoPath}`);
+                            // Reload timeline data from server and refresh UI
+                            try {
+                                const loadResp = await api.fetchApi(`/bsai_premiere_pro/timeline_load?node_id=${encodeURIComponent(node.id)}`);
+                                const loadData = await loadResp.json();
+                                if (loadData?.timeline_data) {
+                                    if (!node.properties) node.properties = {};
+                                    node.properties.bsai_td = loadData.timeline_data;
+                                    // Trigger widget refresh
+                                    const w = node.widgets?.find(w => w.name === "timeline_widget");
+                                    if (w?._bsaiWidget) {
+                                        w._bsaiWidget._renderTimeline?.();
+                                        w._bsaiWidget._refreshTitle?.();
+                                    }
+                                    node.setDirtyCanvas(true, true);
+                                }
+                            } catch (e) {
+                                console.warn("[BSAI Premiere Pro] refresh after auto-import failed:", e);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn("[BSAI Premiere Pro] add_clip API failed:", e);
+                    }
+                });
+            } catch (e) {
+                console.warn("[BSAI Premiere Pro] h3_extender_clip_av handler error:", e);
+            }
+        };
+
+        // ComfyUI API custom event (preferred)
+        if (api?.addEventListener) {
+            api.addEventListener("h3_extender_clip_av", _onH3ClipAv);
+        }
+        // Fallback: raw WebSocket message
+        if (api?.socket?.addEventListener) {
+            api.socket.addEventListener("message", (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data?.type === "h3_extender_clip_av" || data?.data?.type === "h3_extender_clip_av") {
+                        const payload = data.data || data;
+                        _onH3ClipAv({ detail: payload });
+                    }
+                } catch {}
+            });
+        }
+        console.log("[BSAI Premiere Pro] Listening for H3 per-clip WebSocket push (h3_extender_clip_av)");
+    },
 
     beforeRegisterNodeDef(nodeType, nodeData, appInstance) {
         if (nodeData.name !== NODE_TYPE) return;

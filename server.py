@@ -398,6 +398,100 @@ async def load_timeline(request):
     return web.json_response({"timeline_data": data})
 
 
+@PromptServer.instance.routes.post("/bsai_premiere_pro/add_clip")
+async def add_clip(request):
+    """Add a video file to the timeline by path (used by H3 per-clip WebSocket push)."""
+    try:
+        import json as _json
+        import os as _os
+        import time as _time
+        body = await request.json()
+        node_id = str(body.get("node_id", ""))
+        file_path = str(body.get("file_path", ""))
+        clip_name = str(body.get("clip_name", ""))
+        if not node_id or not file_path or not _os.path.exists(file_path):
+            return web.json_response({"error": "missing node_id or file_path not found"}, status=400)
+
+        td_raw = _timeline_store.get(node_id, '{"clips":[],"known_files":[],"deleted_files":[],"directory_history":{}}')
+        td = _json.loads(td_raw)
+        if not td.get("clips"):
+            td["clips"] = []
+        if not td.get("known_files"):
+            td["known_files"] = []
+        if not td.get("video_tracks"):
+            td["video_tracks"] = [{"name": "V1", "locked": False, "visible": True}]
+        if not td.get("audio_tracks"):
+            td["audio_tracks"] = [{"name": "A1", "locked": False, "muted": False, "solo": False}]
+
+        file_name = _os.path.basename(file_path)
+        # Skip duplicate
+        if file_name in td["known_files"] or any(c.get("file_name") == file_name for c in td["clips"]):
+            return web.json_response({"ok": True, "skipped": "duplicate"})
+
+        # Probe metadata with ffprobe if available
+        dur, w, h, fps = 0.0, 1920, 1080, 24.0
+        try:
+            import subprocess as _sp
+            _ffprobe = None
+            for _cand in ["ffprobe"]:
+                from shutil import which as _which
+                _ffprobe = _which(_cand)
+                if _ffprobe:
+                    break
+            if _ffprobe:
+                _r = _sp.run([_ffprobe, "-v", "error", "-select_streams", "v:0",
+                               "-show_entries", "stream=width,height,r_frame_rate:format=duration",
+                               "-of", "json", file_path], capture_output=True, text=True, timeout=10)
+                _meta = _json.loads(_r.stdout)
+                if _meta.get("streams"):
+                    w = int(_meta["streams"][0].get("width", 1920))
+                    h = int(_meta["streams"][0].get("height", 1080))
+                    _rfr = _meta["streams"][0].get("r_frame_rate", "24/1")
+                    if "/" in _rfr:
+                        _n, _d = _rfr.split("/")
+                        fps = float(_n) / float(_d) if float(_d) > 0 else 24.0
+                if _meta.get("format"):
+                    dur = float(_meta["format"].get("duration", 0))
+        except Exception:
+            pass
+
+        _ts = int(_time.time() * 1000)
+        _vId = f"h3clip_{_ts}_{node_id}"
+        _aId = f"h3clip_{_ts+1}_{node_id}"
+        _base = {
+            "file_path": file_path,
+            "file_name": file_name,
+            "created_time": _time.time(),
+            "duration": round(dur, 3),
+            "width": w,
+            "height": h,
+            "fps": fps,
+            "has_audio": True,
+            "trim_start": 0,
+            "trim_end": round(dur, 3),
+            "transition_in": "cut",
+            "transition_out": "cut",
+            "transition_duration": 0.5,
+            "audio_replacement": None,
+            "audio_fade_in": 0,
+            "audio_fade_out": 0,
+            "video_enabled": True,
+            "audio_enabled": True,
+            "label": clip_name or file_name,
+        }
+        td["clips"].append({**_base, "id": _vId, "track_type": "video", "track_index": 0, "linked_id": _aId, "is_video_part": True})
+        td["clips"].append({**_base, "id": _aId, "track_type": "audio", "track_index": 0, "linked_id": _vId, "is_video_part": False})
+        td["known_files"].append(file_name)
+
+        _timeline_store[node_id] = _json.dumps(td, ensure_ascii=False)
+        print(f"[BSAI Premiere Pro] add_clip: '{file_name}' ({dur:.1f}s, {w}x{h}) added to node {node_id}")
+        return web.json_response({"ok": True, "clip_count": len(td["clips"]) // 2})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return web.json_response({"error": str(e)}, status=500)
+
+
 @PromptServer.instance.routes.post("/bsai_premiere_pro/upload")
 async def upload_file(request):
     """Upload one or more media files and return their saved paths + metadata."""
