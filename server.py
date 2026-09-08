@@ -180,9 +180,48 @@ async def render_video(request):
         if not clips:
             return web.json_response({"error": "No clips to merge"})
 
+        # 4K upscale: honour the global switch passed from the timeline editor,
+        # plus any clip-level upscale_enable inside timeline_data. Without this
+        # the render endpoint would emit the source clips untouched.
+        try:
+            upscale_enable = bool(data.get("upscale_enable", False))
+            upscale_model = data.get("upscale_model", "realesr-general-x4v3.pth")
+            upscale_scale = float(data.get("upscale_scale", 4.0))
+            upscale_tile_size = int(data.get("upscale_tile_size", 0) or 0)
+            upscale_batch = int(data.get("upscale_batch", 4) or 4)
+            upscale_detail = float(data.get("upscale_detail", 0.5))
+            upscale_face = data.get("upscale_face", "Off")
+        except (TypeError, ValueError):
+            upscale_enable, upscale_model = False, "realesr-general-x4v3.pth"
+            upscale_scale, upscale_tile_size = 4.0, 0
+            upscale_batch, upscale_detail, upscale_face = 4, 0.5, "Off"
+
+        upscale_params = None
+        _any_clip_upscale = any(
+            c.get("upscale_enable", False) for c in clips
+            if isinstance(c, dict)
+        )
+        if upscale_enable or _any_clip_upscale:
+            upscale_params = {
+                "enable": upscale_enable,
+                "model_name": upscale_model,
+                "scale": upscale_scale,
+                "tile_size": upscale_tile_size,
+                "tile_pad": 16,
+                "batch_frames": upscale_batch,
+                "detail_amount": upscale_detail,
+                "detail_radius": 1.8,
+                "softness": 0.10,
+                "face_restore": upscale_face,
+                "use_fp16": True,
+            }
+            if _any_clip_upscale:
+                print(f"[BSAI Premiere Pro] 检测到片段级超分，已启用超分参数（全局超分={'开' if upscale_enable else '关'}）")
+
         output_path, error = process_and_merge(
             timeline_data, output_filename, format_str, pix_fmt,
-            crf, frame_rate, default_transition, transition_duration
+            crf, frame_rate, default_transition, transition_duration,
+            upscale_params
         )
 
         if error:

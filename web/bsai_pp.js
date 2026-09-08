@@ -5890,6 +5890,13 @@ class TimelineEditor {
                 frame_rate: parseFloat(this._getWidgetValue("frame_rate", 24)),
                 default_transition: this._getWidgetValue("default_transition", "cut"),
                 transition_duration: parseFloat(this._getWidgetValue("transition_duration", 0.5)),
+                upscale_enable: this._getWidgetValue("upscale_enable", false),
+                upscale_model: this._getWidgetValue("upscale_model", "realesr-general-x4v3.pth"),
+                upscale_scale: parseFloat(this._getWidgetValue("upscale_scale", 4.0)),
+                upscale_tile_size: parseInt(this._getWidgetValue("upscale_tile_size", 0), 10) || 0,
+                upscale_batch: parseInt(this._getWidgetValue("upscale_batch", 4), 10) || 4,
+                upscale_detail: parseFloat(this._getWidgetValue("upscale_detail", 0.5)),
+                upscale_face: this._getWidgetValue("upscale_face", "Off"),
             };
             this._updateProgress(30, "合并视频片段...");
             const resp = await api.fetchApi("/bsai_premiere_pro/render", {
