@@ -26,7 +26,7 @@ class BSAIPremiereProTimeline:
         return {
             "required": {
                 "watch_directory": ("STRING", {
-                    "default": "output",
+                    "default": ".\\ComfyUI\\output",
                     "multiline": False,
                 }),
                 "auto_import": ("BOOLEAN", {"default": True}),
