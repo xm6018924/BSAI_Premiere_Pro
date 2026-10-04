@@ -1131,6 +1131,7 @@ def _process_legacy(enabled_clips, temp_dir, output_path,
                     upscale_params=None):
     """Legacy mode: sequential concat with both video and audio from each clip."""
     processed_files = []
+    _any_clip_upscaled = False
     for i, clip in enumerate(enabled_clips):
         output_file = os.path.join(temp_dir, f"clip_{i:04d}.mp4")
         cmd = _build_clip_command(
@@ -1145,6 +1146,7 @@ def _process_legacy(enabled_clips, temp_dir, output_path,
         if result.returncode != 0:
             return None, f"Failed to process clip {i} ({clip.get('file_name', '')}):\n{result.stderr}"
         # Clip-level 4K upscale: if this clip has upscale_enable, upscale it individually before merge
+        _clip_already_upscaled = False
         if upscale_params and clip.get('upscale_enable', False) and os.path.exists(output_file):
             clip_model = clip.get('upscale_model', '')
             clip_upscale_params = dict(upscale_params)
@@ -1156,6 +1158,8 @@ def _process_legacy(enabled_clips, temp_dir, output_path,
             up_file = upscale_video_file(output_file, clip_upscale_params, target_fps, temp_dir)
             if up_file and os.path.exists(up_file):
                 output_file = up_file
+                _clip_already_upscaled = True
+                _any_clip_upscaled = True
                 print(f"[BSAI Premiere Pro]   ✓ 超分完成: {os.path.basename(up_file)}")
             else:
                 print(f"[BSAI Premiere Pro]   ⚠ 超分失败，使用原文件")
@@ -1169,7 +1173,8 @@ def _process_legacy(enabled_clips, temp_dir, output_path,
         # Single clip: just copy/re-encode to output
         shutil.copy2(processed_files[0], output_path)
         print(f"[BSAI Premiere Pro] Single clip, copied -> {output_path}")
-        if upscale_params and upscale_params.get('enable', False) and os.path.exists(output_path):
+        # 仅当该片段未做过 clip-level 超分时，才走 legacy 全局超分；否则避免二次放大
+        if upscale_params and upscale_params.get('enable', False) and not _clip_already_upscaled and os.path.exists(output_path):
             return _upscale_legacy_output(output_path, upscale_params, target_fps, temp_dir, ffmpeg, output_path)
         return output_path, None
 
@@ -1222,7 +1227,7 @@ def _process_legacy(enabled_clips, temp_dir, output_path,
         result = subprocess.run(fallback_cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
         if result.returncode != 0:
             return None, f"Failed to merge clips:\n{result.stderr}"
-    if upscale_params and upscale_params.get('enable', False) and os.path.exists(output_path):
+    if upscale_params and upscale_params.get('enable', False) and not _any_clip_upscaled and os.path.exists(output_path):
         return _upscale_legacy_output(output_path, upscale_params, target_fps, temp_dir, ffmpeg, output_path)
     print(f"[BSAI Premiere Pro] Output saved: {output_path}")
     return output_path, None
