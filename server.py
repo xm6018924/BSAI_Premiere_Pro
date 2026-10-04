@@ -203,7 +203,7 @@ async def render_video(request):
         )
         if upscale_enable or _any_clip_upscale:
             upscale_params = {
-                "enable": upscale_enable,
+                "enable": bool(upscale_enable or _any_clip_upscale),
                 "model_name": upscale_model,
                 "scale": upscale_scale,
                 "tile_size": upscale_tile_size,

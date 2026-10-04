@@ -304,7 +304,7 @@ class BSAIPremiereProTimeline:
         _any_clip_upscale = any(c.get('upscale_enable', False) for c in _clips_for_upscale)
         if upscale_enable or _any_clip_upscale:
             upscale_params = {
-                "enable": upscale_enable,
+                "enable": bool(upscale_enable or _any_clip_upscale),
                 "model_name": upscale_model,
                 "scale": upscale_scale,
                 "tile_size": upscale_tile_size,
