@@ -1027,6 +1027,17 @@ def upscale_video_file(video_path, params, target_fps, temp_dir):
     if p.returncode != 0:
         raise RuntimeError(f"超分后编码失败: {err[-1500:]}")
     print(f"[BSAI Premiere Pro] 4K超分完成: {out_path} ({ow}x{oh})")
+    # 拷一份到 ComfyUI output 目录，避免临时目录被清理后丢失
+    try:
+        import folder_paths
+        out_dir = folder_paths.get_output_directory()
+        os.makedirs(out_dir, exist_ok=True)
+        ts = __import__("datetime").datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_name = os.path.join(out_dir, f"premiere_pro_upscaled_{ts}.mp4")
+        shutil.copy2(out_path, save_name)
+        print(f"[BSAI Premiere Pro]   ✓ 已保存超分中间文件: {save_name}")
+    except Exception as _e:
+        print(f"[BSAI Premiere Pro]   ⚠ 拷贝超分中间文件失败: {_e}")
     return out_path
 
 
