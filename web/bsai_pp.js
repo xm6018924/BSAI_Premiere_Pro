@@ -6006,7 +6006,23 @@ class TimelineEditor {
 function _registerBsaiPP() {
     const app = window.comfyAPI?.app?.app ?? window.app;
     if (!app || typeof app.registerExtension !== "function") {
-        setTimeout(_registerBsaiPP, 50);
+        setTimeout(_registerBsaiPP, 100);
+        return;
+    }
+    // ComfyUI 0.38+ (Vue/Pinia): registerExtension may throw if Pinia stores
+    // are not fully initialized yet (error: Cannot read properties of undefined (reading '_s')).
+    // Detect app readiness more carefully before registering.
+    const _appReady = (() => {
+        try {
+            // app.extensions exists and is an array -> core extension system ready
+            if (app.extensions && Array.isArray(app.extensions)) return true;
+            // Fallback: try to detect Pinia readiness via comfyAPI sub-modules
+            if (window.comfyAPI && Object.keys(window.comfyAPI).length > 3) return true;
+        } catch (_) {}
+        return false;
+    })();
+    if (!_appReady) {
+        setTimeout(_registerBsaiPP, 150);
         return;
     }
     // Don't register twice (e.g. after successful retry)
@@ -6695,16 +6711,15 @@ function _registerBsaiPP() {
     }, 1000);
     } catch (e) {
         console.error("[BSAI Premiere Pro] Extension registration failed:", e);
-        // ComfyUI 0.33.0: registerExtension() internally uses Pinia/Vue stores
-        // (useStore) which may not be initialized yet when our script loads.
-        // Retry until Pinia is ready.
+        // ComfyUI 0.38+: registerExtension may fail if Pinia stores are not
+        // fully initialized yet. Retry with longer interval to avoid state
+        // corruption from repeated failed attempts.
         if (!window.__bsai_pp_retry_count) window.__bsai_pp_retry_count = 0;
         window.__bsai_pp_retry_count++;
-        if (window.__bsai_pp_retry_count <= 100) { // 100 * 200ms = 20s max
-            console.log("[BSAI Premiere Pro] Retrying in 200ms (attempt " + window.__bsai_pp_retry_count + "/100)...");
-            setTimeout(_registerBsaiPP, 200);
+        if (window.__bsai_pp_retry_count <= 30) { // 30 * 500ms = 15s max
+            setTimeout(_registerBsaiPP, 500);
         } else {
-            console.error("[BSAI Premiere Pro] Max registration retries (100) reached.");
+            console.error("[BSAI Premiere Pro] Max registration retries (30) reached, giving up.");
         }
     }
 }

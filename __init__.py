@@ -50,10 +50,16 @@ def _inject_script_into_html(html):
     # Remove any older version of our script tag (stale cache)
     html = _BSAI_TAG_RE.sub('', html)
     if "</head>" in html:
-        return html.replace("</head>", tag + "</head>")
-    if "</body>" in html:
-        return html.replace("</body>", tag + "</body>")
-    return html + tag
+        result = html.replace("</head>", tag + "</head>", 1)
+    elif "</body>" in html:
+        result = html.replace("</body>", tag + "</body>", 1)
+    else:
+        result = html + tag
+    # Sanity check: ensure HTML is still complete after injection
+    if "</html>" not in result:
+        print("[BSAI Premiere Pro] Injection sanity check failed, aborting injection")
+        return None
+    return result
 
 
 # Mechanism 1: Middleware (works if app is not yet frozen)
@@ -112,16 +118,29 @@ try:
         if "text/html" not in content_type:
             return
         try:
+            # Try to get HTML content (compatible with regular Response and FileResponse)
+            html = None
             body = response.body
             if isinstance(body, bytes):
                 html = body.decode("utf-8", errors="ignore")
             elif isinstance(body, str):
                 html = body
             else:
+                # FileResponse or other streaming response: read from file
+                file_path = getattr(response, "_path", None) or getattr(response, "path", None)
+                if file_path and os.path.isfile(str(file_path)):
+                    with open(str(file_path), "r", encoding="utf-8") as f:
+                        html = f.read()
+
+            if html is None:
                 return
+
             modified = _inject_script_into_html(html)
             if modified is not None:
-                response.body = modified.encode("utf-8")
+                modified_bytes = modified.encode("utf-8")
+                response.body = modified_bytes
+                # Ensure Content-Length is accurate
+                response.headers["Content-Length"] = str(len(modified_bytes))
                 # Prevent browser from caching HTML with stale script tags
                 response.headers["Cache-Control"] = "no-store, must-revalidate"
                 response.headers["Pragma"] = "no-cache"
