@@ -1588,6 +1588,10 @@ class TimelineEditor {
         const w = this._getWidget(name);
         return w ? w.value : fallback;
     }
+    _setWidgetValue(name, value) {
+        const w = this._getWidget(name);
+        if (w) w.value = value;
+    }
 
     open() {
         if (this.modal) return;
