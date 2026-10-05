@@ -1357,7 +1357,13 @@ def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
         final_audio = _mix_audio_tracks(audio_track_files, temp_dir)
 
     # --- 4K 超分高清修复：先对视频轨文件超分，最后再与音频轨合并输出 ---
-    if final_video and upscale_params and upscale_params.get('enable', False):
+    # 如果任何视频片段已在 clip-level 做过超分，跳过全局二次超分
+    _any_clip_upscaled = any(
+        c.get('upscale_enable', False)
+        for clips in video_clips_by_track.values()
+        for c in clips
+    )
+    if final_video and upscale_params and upscale_params.get('enable', False) and not _any_clip_upscaled:
         print(f"[BSAI Premiere Pro] 4K超分开启：先对视频轨执行超分高清修复，再与音频轨合并")
         try:
             final_video = upscale_video_file(final_video, upscale_params, target_fps, temp_dir)
