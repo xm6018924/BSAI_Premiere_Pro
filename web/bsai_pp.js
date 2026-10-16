@@ -10,9 +10,9 @@ let api = window.comfyAPI?.api?.api ?? window.api;
 const NODE_TYPE = "BSAIPremiereProTimeline";
 const POLL_INTERVAL = 3000;
 const TRANSITIONS = ["cut", "fade", "black", "white"];
-const TRANSITION_LABELS = { cut: "切镜", fade: "淡入淡出", black: "黑屏过渡", white: "白屏过渡" };
+const TRANSITION_LABELS = { cut: "Cut", fade: "Fade", black: "Black Transition", white: "White Transition" };
 const TRANSITION_ICONS = { cut: "✂️", fade: "🌫️", black: "⬛", white: "⬜" };
-const TRANSITION_DESCS = { cut: "硬切", fade: "平滑过渡", black: "黑屏淡入", white: "白屏淡入" };
+const TRANSITION_DESCS = { cut: "Hard cut", fade: "Smooth transition", black: "Fade to black", white: "Fade to white" };
 
 function formatTime(seconds) {
     if (!seconds || seconds < 0) return "00:00.00";
@@ -521,7 +521,7 @@ function _addMaximizeBtn(dialog) {
             maxBtn.className = "bsai-pp-close bsai-pp-dlg-maximize";
             maxBtn.style.marginRight = "6px";
             maxBtn.innerHTML = "⛶";
-            maxBtn.title = "最大化/还原";
+            maxBtn.title = "Maximize / Restore";
             maxBtn.onclick = (e) => {
                 e.stopPropagation();
                 modal.classList.toggle("maximized");
@@ -542,7 +542,7 @@ function _addMaximizeBtn(dialog) {
     const maxBtn = document.createElement("button");
     maxBtn.className = "bsai-pp-dlg-maximize";
     maxBtn.innerHTML = "⛶";
-    maxBtn.title = "最大化/还原";
+    maxBtn.title = "Maximize / Restore";
     maxBtn.onclick = (e) => {
         e.stopPropagation();
         dialog.classList.toggle("maximized");
@@ -560,16 +560,16 @@ function browseDirectoryDialog(initialPath) {
         dialog.className = "bsai-pp-import-dialog";
         dialog.style.minWidth = "560px";
         dialog.innerHTML = `
-            <h3>📁 选择目录</h3>
+            <h3>📁 Choose Directory</h3>
             <div class="bsai-pp-breadcrumb" data-breadcrumb></div>
             <div style="display:flex;gap:6px;margin-bottom:8px;">
-                <input type="text" data-manual-path style="flex:1;background:#1a1a1a;border:1px solid #444;color:#e0e0e0;padding:5px 8px;border-radius:4px;font-size:12px;" placeholder="输入路径后回车前往，如 C:\\Users\\...">
-                <button class="bsai-pp-btn" data-act="go">前往</button>
+                <input type="text" data-manual-path style="flex:1;background:#1a1a1a;border:1px solid #444;color:#e0e0e0;padding:5px 8px;border-radius:4px;font-size:12px;" placeholder="Type a path and press Enter, e.g. C:\\Users\\...">
+                <button class="bsai-pp-btn" data-act="go">Go</button>
             </div>
             <div class="bsai-pp-import-list" data-dir-list></div>
             <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
-                <button class="bsai-pp-btn" data-cancel>取消</button>
-                <button class="bsai-pp-btn bsai-pp-btn-primary" data-select>选择此目录</button>
+                <button class="bsai-pp-btn" data-cancel>Cancel</button>
+                <button class="bsai-pp-btn bsai-pp-btn-primary" data-select>Select This Directory</button>
             </div>`;
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
@@ -581,7 +581,7 @@ function browseDirectoryDialog(initialPath) {
         const renderBreadcrumb = (path) => {
             const bcEl = dialog.querySelector("[data-breadcrumb]");
             if (!path) {
-                bcEl.innerHTML = `<span class="bsai-pp-breadcrumb-current">💻 我的电脑</span>`;
+                bcEl.innerHTML = `<span class="bsai-pp-breadcrumb-current">💻 My Computer</span>`;
                 return;
             }
             const sep = path.includes("/") ? "/" : "\\";
@@ -593,7 +593,7 @@ function browseDirectoryDialog(initialPath) {
                 html += `<span class="bsai-pp-breadcrumb-item" data-bc-path="${drive}\\">💾 ${drive}</span>`;
                 parts.shift();
             } else if (path.startsWith("/")) {
-                html += `<span class="bsai-pp-breadcrumb-item" data-bc-path="/">💻 根目录</span>`;
+                html += `<span class="bsai-pp-breadcrumb-item" data-bc-path="/">💻 Root</span>`;
             }
             let acc = path[1] === ":" ? parts.length > 0 ? path.split(sep)[0] + "\\" : "" : "/";
             for (let i = 0; i < parts.length; i++) {
@@ -621,7 +621,7 @@ function browseDirectoryDialog(initialPath) {
             if (loadingAbort) { try { loadingAbort.abort(); } catch {} }
             loadingAbort = new AbortController();
             const listEl = dialog.querySelector("[data-dir-list]");
-            listEl.innerHTML = `<div style="color:#666;padding:10px;">⏳ 加载中...</div>`;
+            listEl.innerHTML = `<div style="color:#666;padding:10px;">⏳ Loading...</div>`;
             const timeoutId = setTimeout(() => loadingAbort.abort(), 12000);
             try {
                 const resp = await api.fetchApi(`/bsai_premiere_pro/browse?path=${encodeURIComponent(path)}`, {
@@ -630,7 +630,7 @@ function browseDirectoryDialog(initialPath) {
                 clearTimeout(timeoutId);
                 const data = await resp.json();
                 if (data.error) {
-                    listEl.innerHTML = `<div style="color:#d35454;padding:10px;">❌ ${escapeHtml(data.error)}<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>重试</button></div>`;
+                    listEl.innerHTML = `<div style="color:#d35454;padding:10px;">❌ ${escapeHtml(data.error)}<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>Retry</button></div>`;
                     listEl.querySelector("[data-retry]")?.addEventListener("click", () => loadDirs(path));
                     return;
                 }
@@ -643,10 +643,10 @@ function browseDirectoryDialog(initialPath) {
                 listEl.innerHTML = "";
                 const countEl = document.createElement("div");
                 countEl.style.cssText = "color:#888;font-size:11px;padding:4px 10px;border-bottom:1px solid #333;margin-bottom:4px;";
-                countEl.textContent = `共 ${data.dirs.length} 个子目录${data.errors?.length ? ` (${data.errors.length} 个无法访问)` : ""}`;
+                countEl.textContent = `${data.dirs.length} subdirectories total${data.errors?.length ? ` (${data.errors.length} inaccessible)` : ""}`;
                 listEl.appendChild(countEl);
                 if (data.dirs.length === 0) {
-                    listEl.innerHTML = `<div style="color:#666;padding:10px;">📂 没有子目录</div>`;
+                    listEl.innerHTML = `<div style="color:#666;padding:10px;">📂 No subdirectories</div>`;
                 }
                 for (const dir of data.dirs) {
                     const item = document.createElement("div");
@@ -669,9 +669,9 @@ function browseDirectoryDialog(initialPath) {
             } catch (e) {
                 clearTimeout(timeoutId);
                 if (e.name === "AbortError") {
-                    listEl.innerHTML = `<div style="color:#d35454;padding:10px;">⏱ 加载超时，请尝试手动输入路径<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>重试</button></div>`;
+                    listEl.innerHTML = `<div style="color:#d35454;padding:10px;">⏱ Load timed out, try entering the path manually<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>Retry</button></div>`;
                 } else {
-                    listEl.innerHTML = `<div style="color:#d35454;padding:10px;">❌ 加载失败: ${escapeHtml(e.message)}<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>重试</button></div>`;
+                    listEl.innerHTML = `<div style="color:#d35454;padding:10px;">❌ Failed to load: ${escapeHtml(e.message)}<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>Retry</button></div>`;
                 }
                 listEl.querySelector("[data-retry]")?.addEventListener("click", () => loadDirs(path));
             }
@@ -710,19 +710,19 @@ function browseFilesDialog(initialPath) {
         dialog.className = "bsai-pp-import-dialog";
         dialog.style.minWidth = "640px";
         dialog.innerHTML = `
-            <h3>📂 选择文件（视频/音频/图片）</h3>
+            <h3>📂 Choose Files (Video/Audio/Image)</h3>
             <div class="bsai-pp-breadcrumb" data-breadcrumb></div>
             <div style="display:flex;gap:6px;margin-bottom:8px;">
-                <input type="text" data-manual-path style="flex:1;background:#1a1a1a;border:1px solid #444;color:#e0e0e0;padding:5px 8px;border-radius:4px;font-size:12px;" placeholder="输入路径后回车前往">
-                <button class="bsai-pp-btn" data-act="go">前往</button>
-                <button class="bsai-pp-btn" data-act="up">⬆ 上级</button>
+                <input type="text" data-manual-path style="flex:1;background:#1a1a1a;border:1px solid #444;color:#e0e0e0;padding:5px 8px;border-radius:4px;font-size:12px;" placeholder="Type a path and press Enter">
+                <button class="bsai-pp-btn" data-act="go">Go</button>
+                <button class="bsai-pp-btn" data-act="up">⬆ Up</button>
             </div>
             <div class="bsai-pp-import-list" data-file-list></div>
             <div style="display:flex;gap:8px;justify-content:space-between;margin-top:8px;align-items:center;">
-                <span data-selected-count style="color:#888;font-size:12px;">未选择文件</span>
+                <span data-selected-count style="color:#888;font-size:12px;">No files selected</span>
                 <div style="display:flex;gap:8px;">
-                    <button class="bsai-pp-btn" data-cancel>取消</button>
-                    <button class="bsai-pp-btn bsai-pp-btn-primary" data-import>导入选中文件</button>
+                    <button class="bsai-pp-btn" data-cancel>Cancel</button>
+                    <button class="bsai-pp-btn bsai-pp-btn-primary" data-import>Import Selected Files</button>
                 </div>
             </div>`;
         overlay.appendChild(dialog);
@@ -739,7 +739,7 @@ function browseFilesDialog(initialPath) {
         const renderBreadcrumb = (path) => {
             const bcEl = dialog.querySelector("[data-breadcrumb]");
             if (!path) {
-                bcEl.innerHTML = `<span class="bsai-pp-breadcrumb-current">💻 我的电脑</span>`;
+                bcEl.innerHTML = `<span class="bsai-pp-breadcrumb-current">💻 My Computer</span>`;
                 return;
             }
             const sep = path.includes("/") ? "/" : "\\";
@@ -750,7 +750,7 @@ function browseFilesDialog(initialPath) {
                 html += `<span class="bsai-pp-breadcrumb-item" data-bc-path="${drive}\\">💾 ${drive}</span>`;
                 parts.shift();
             } else if (path.startsWith("/")) {
-                html += `<span class="bsai-pp-breadcrumb-item" data-bc-path="/">💻 根目录</span>`;
+                html += `<span class="bsai-pp-breadcrumb-item" data-bc-path="/">💻 Root</span>`;
             }
             for (let i = 0; i < parts.length; i++) {
                 let acc;
@@ -777,8 +777,8 @@ function browseFilesDialog(initialPath) {
             const el = dialog.querySelector("[data-selected-count]");
             if (el) {
                 el.textContent = selectedFiles.size > 0
-                    ? `已选择 ${selectedFiles.size} 个文件`
-                    : "未选择文件";
+                    ? `Selected ${selectedFiles.size} files`
+                    : "No files selected";
             }
         };
 
@@ -786,7 +786,7 @@ function browseFilesDialog(initialPath) {
             if (loadingAbort) { try { loadingAbort.abort(); } catch {} }
             loadingAbort = new AbortController();
             const listEl = dialog.querySelector("[data-file-list]");
-            listEl.innerHTML = `<div style="color:#666;padding:10px;">⏳ 加载中...</div>`;
+            listEl.innerHTML = `<div style="color:#666;padding:10px;">⏳ Loading...</div>`;
             const timeoutId = setTimeout(() => loadingAbort.abort(), 30000);
             try {
                 // Try browse_files endpoint first (returns dirs + media files)
@@ -807,7 +807,7 @@ function browseFilesDialog(initialPath) {
                 }
                 clearTimeout(timeoutId);
                 if (data.error) {
-                    listEl.innerHTML = `<div style="color:#d35454;padding:10px;">❌ ${escapeHtml(data.error)}<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>重试</button></div>`;
+                    listEl.innerHTML = `<div style="color:#d35454;padding:10px;">❌ ${escapeHtml(data.error)}<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>Retry</button></div>`;
                     listEl.querySelector("[data-retry]")?.addEventListener("click", () => loadFiles(path));
                     return;
                 }
@@ -823,7 +823,7 @@ function browseFilesDialog(initialPath) {
                 countEl.style.cssText = "color:#888;font-size:11px;padding:4px 10px;border-bottom:1px solid #333;margin-bottom:4px;";
                 const dirCount = data.dirs?.length || 0;
                 const fileCount = data.files?.length || 0;
-                countEl.textContent = `📁 ${dirCount} 个子目录  |  📄 ${fileCount} 个媒体文件`;
+                countEl.textContent = `📁 ${dirCount} subdirectories  |  📄 ${fileCount} media files`;
                 listEl.appendChild(countEl);
 
                 // Directories
@@ -867,14 +867,14 @@ function browseFilesDialog(initialPath) {
                 }
 
                 if (dirCount === 0 && fileCount === 0) {
-                    listEl.innerHTML += `<div style="color:#666;padding:10px;">📂 没有子目录或媒体文件</div>`;
+                    listEl.innerHTML += `<div style="color:#666;padding:10px;">📂 No subdirectories or media files</div>`;
                 }
             } catch (e) {
                 clearTimeout(timeoutId);
                 if (e.name === "AbortError") {
-                    listEl.innerHTML = `<div style="color:#d35454;padding:10px;">⏱ 加载超时，请尝试手动输入路径<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>重试</button></div>`;
+                    listEl.innerHTML = `<div style="color:#d35454;padding:10px;">⏱ Load timed out, try entering the path manually<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>Retry</button></div>`;
                 } else {
-                    listEl.innerHTML = `<div style="color:#d35454;padding:10px;">❌ 加载失败: ${escapeHtml(e.message)}<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>重试</button></div>`;
+                    listEl.innerHTML = `<div style="color:#d35454;padding:10px;">❌ Failed to load: ${escapeHtml(e.message)}<br><button class="bsai-pp-btn" style="margin-top:6px;" data-retry>Retry</button></div>`;
                 }
                 listEl.querySelector("[data-retry]")?.addEventListener("click", () => loadFiles(path));
             }
@@ -1168,7 +1168,7 @@ class AutoImporter {
         // Check port connection state for mode label
         const imageConnected = this.node.inputs?.some(i => i.name === "image" && i.link != null);
         const audioConnected = this.node.inputs?.some(i => i.name === "audio" && i.link != null);
-        const modeLabel = (imageConnected && audioConnected) ? "⚡自动" : "✋手动";
+        const modeLabel = (imageConnected && audioConnected) ? "⚡Auto" : "✋Manual";
         if (count > 0) {
             this.node.title = `🎬 BSAI Premiere Pro (${count} clips / ${formatTime(total)}) [${modeLabel}]`;
         } else {
@@ -1330,12 +1330,12 @@ class TimelineEditor {
             return;
         }
         if (this._isTrackLocked(clip)) {
-            this._toast("源轨道已锁定，无法移动", "error");
+            this._toast("Source track is locked, cannot move", "error");
             return;
         }
         const targetTracks = trackType === "video" ? this.td.video_tracks : this.td.audio_tracks;
         if (targetTracks && targetTracks[newTrackIndex] && targetTracks[newTrackIndex].locked) {
-            this._toast("目标轨道已锁定", "error");
+            this._toast("Target track is locked", "error");
             return;
         }
         // Collect all track clip arrays BEFORE changing track_index
@@ -1438,12 +1438,12 @@ class TimelineEditor {
         const oldTrackIndex = clip.track_index;
 
         if (this._isTrackLocked(clip)) {
-            this._toast("源轨道已锁定，无法移动", "error");
+            this._toast("Source track is locked, cannot move", "error");
             return;
         }
         const targetTracks = trackType === "video" ? this.td.video_tracks : this.td.audio_tracks;
         if (targetTracks && targetTracks[newTrackIndex] && targetTracks[newTrackIndex].locked) {
-            this._toast("目标轨道已锁定", "error");
+            this._toast("Target track is locked", "error");
             return;
         }
 
@@ -1562,8 +1562,8 @@ class TimelineEditor {
         this.selectedIndex = this.td.clips.indexOf(clip);
         this._save();
         this._renderAll();
-        const label = trackType === "audio" ? "音频" : "视频";
-        this._toast(`已移动${label}到 ${formatTime(finalDropTime)}${finalDropTime !== dropTime ? " (已吸附对齐)" : ""}`, "success");
+        const label = trackType === "audio" ? "audio" : "video";
+        this._toast(`Moved ${label} to ${formatTime(finalDropTime)}${finalDropTime !== dropTime ? " (snapped)" : ""}`, "success");
     }
 
     _save() {
@@ -1649,40 +1649,40 @@ class TimelineEditor {
         this.modal.innerHTML = `
             <div class="bsai-pp-modal">
                 <div class="bsai-pp-header">
-                    <span class="bsai-pp-title">🎬 BSAI Premiere Pro - 时间轴编辑器</span>
+                    <span class="bsai-pp-title">🎬 BSAI Premiere Pro - Timeline Editor</span>
                     <div style="display:flex;gap:6px;">
-                        <button class="bsai-pp-close bsai-pp-dlg-maximize" data-act="maximize" title="最大化/还原">⛶</button>
-                        <button class="bsai-pp-close" data-act="close" title="关闭">✕</button>
+                        <button class="bsai-pp-close bsai-pp-dlg-maximize" data-act="maximize" title="Maximize / Restore">⛶</button>
+                        <button class="bsai-pp-close" data-act="close" title="Close">✕</button>
                     </div>
                 </div>
                 <div class="bsai-pp-toolbar">
-                    <label>自动导入</label>
+                    <label>Auto Import</label>
                     <input type="checkbox" data-act="auto-import" ${this._getWidgetValue("auto_import", true) ? "checked" : ""}>
-                    <label>监视目录</label>
+                    <label>Watch Directory</label>
                     <input type="text" data-act="dir" value="${escapeHtml(this._getWidgetValue("watch_directory", "output"))}" style="width:120px;">
-                    <button class="bsai-pp-btn" data-act="open-source-dir">📂 源目录</button>
-                    <label>仅带音频</label>
+                    <button class="bsai-pp-btn" data-act="open-source-dir">📂 Source Dir</button>
+                    <label>Video Only</label>
                     <input type="checkbox" data-act="filter-audio" ${this.td.filter_audio_only !== false ? "checked" : ""}>
-                    <button class="bsai-pp-btn" data-act="scan">🔍 扫描</button>
-                    <button class="bsai-pp-btn" data-act="manual-import">📥 导入文件</button>
-                    <button class="bsai-pp-btn" data-act="dir-history">📚 历史目录</button>
-                    <button class="bsai-pp-btn" data-act="scissor" id="bsai-pp-scissor-btn">✂️ 剪刀</button>
-                    <button class="bsai-pp-btn" data-act="play" id="bsai-pp-play-btn">▶️ 播放</button>
-                    <button class="bsai-pp-btn" data-act="add-vtrack">＋ 视频轨道</button>
-                    <button class="bsai-pp-btn" data-act="add-atrack">＋ 音频轨道</button>
-                    <button class="bsai-pp-btn bsai-pp-btn-danger" data-act="clear-all">🗑 清空全部</button>
-                    <button class="bsai-pp-btn" data-act="batch-select" id="bsai-pp-batch-btn">☑ 批量选择</button>
-                    <button class="bsai-pp-btn" data-act="upscale-toggle" id="bsai-pp-upscale-btn" title="4K超分高清修复总开关：开启后渲染输出前自动对视频轨执行AI超分放大">🎞️ 4K超分: 关</button>
-                    <label>对齐</label>
-                    <select class="bsai-pp-align-select" data-act="align-mode" title="横竖屏对齐方式">
-                        <option value="height">高度对齐</option>
-                        <option value="width">宽度对齐</option>
+                    <button class="bsai-pp-btn" data-act="scan">🔍 Scan</button>
+                    <button class="bsai-pp-btn" data-act="manual-import">📥 Import Files</button>
+                    <button class="bsai-pp-btn" data-act="dir-history">📚 History</button>
+                    <button class="bsai-pp-btn" data-act="scissor" id="bsai-pp-scissor-btn">✂️ Scissors</button>
+                    <button class="bsai-pp-btn" data-act="play" id="bsai-pp-play-btn">▶️ Play</button>
+                    <button class="bsai-pp-btn" data-act="add-vtrack">＋ Video Track</button>
+                    <button class="bsai-pp-btn" data-act="add-atrack">＋ Audio Track</button>
+                    <button class="bsai-pp-btn bsai-pp-btn-danger" data-act="clear-all">🗑 Clear All</button>
+                    <button class="bsai-pp-btn" data-act="batch-select" id="bsai-pp-batch-btn">☑ Batch Select</button>
+                    <button class="bsai-pp-btn" data-act="upscale-toggle" id="bsai-pp-upscale-btn" title="4K upscale HD repair master switch: when on, AI-upscales the video track before render output">🎞️ 4K Upscale: Off</button>
+                    <label>Align</label>
+                    <select class="bsai-pp-align-select" data-act="align-mode" title="Portrait/landscape alignment">
+                        <option value="height">Align Height</option>
+                        <option value="width">Align Width</option>
                     </select>
                     <button class="bsai-pp-btn" data-act="zoom-out" style="padding:3px 8px;font-size:14px;">－</button>
                     <span class="bsai-pp-zoom-display" data-zoom-display>100%</span>
                     <button class="bsai-pp-btn" data-act="zoom-in" style="padding:3px 8px;font-size:14px;">＋</button>
                     <div class="bsai-pp-status">
-                        <span><span class="dot ${this._getWidgetValue("auto_import", true) ? "on" : "off"}" data-dot></span> ${this._getWidgetValue("auto_import", true) ? "监控中" : "已停止"}</span>
+                        <span><span class="dot ${this._getWidgetValue("auto_import", true) ? "on" : "off"}" data-dot></span> ${this._getWidgetValue("auto_import", true) ? "Monitoring" : "Stopped"}</span>
                     </div>
                 </div>
                 <div class="bsai-pp-body">
@@ -1691,19 +1691,19 @@ class TimelineEditor {
                             <div class="bsai-pp-timeline-container" data-track-container></div>
                         </div>
                     </div>
-                    <div class="bsai-pp-divider" data-divider title="拖拽调整面板比例"></div>
+                    <div class="bsai-pp-divider" data-divider title="Drag to resize panels"></div>
                     <div class="bsai-pp-edit-section">
-                        <div class="bsai-pp-section-label">剪辑面板</div>
+                        <div class="bsai-pp-section-label">Edit Panel</div>
                         <div class="bsai-pp-edit-content" data-edit></div>
                     </div>
                 </div>
                 <div class="bsai-pp-footer">
                     <div class="bsai-pp-footer-info" data-footer-info></div>
-                    <button class="bsai-pp-btn bsai-pp-btn-primary" data-act="render">🎞️ 渲染输出</button>
+                    <button class="bsai-pp-btn bsai-pp-btn-primary" data-act="render">🎞️ Render Output</button>
                 </div>
                 <div class="bsai-pp-timeline-preview" data-timeline-preview>
                     <video data-preview-video></video>
-                    <button class="preview-enlarge" data-act="enlarge-preview" title="放大/缩小">⛶</button>
+                    <button class="preview-enlarge" data-act="enlarge-preview" title="Zoom In / Out">⛶</button>
                     <button class="preview-close" data-act="close-preview">✕</button>
                     <div class="preview-info" data-preview-info></div>
                     <div class="preview-zoom-info" data-preview-zoom-info></div>
@@ -1965,7 +1965,7 @@ class TimelineEditor {
                 previewVideo.style.transformOrigin = "center center";
                 const zoomInfo = this.modal.querySelector("[data-preview-zoom-info]");
                 if (zoomInfo) {
-                    zoomInfo.textContent = `缩放: ${Math.round(this._previewZoom * 100)}%`;
+                    zoomInfo.textContent = `Zoom: ${Math.round(this._previewZoom * 100)}%`;
                     zoomInfo.classList.add("visible");
                     clearTimeout(this._zoomInfoTimer);
                     this._zoomInfoTimer = setTimeout(() => zoomInfo.classList.remove("visible"), 1500);
@@ -2002,7 +2002,7 @@ class TimelineEditor {
             if (w) w.value = e.target.checked;
             const dot = this.modal.querySelector("[data-dot]");
             if (dot) { dot.className = `dot ${e.target.checked ? "on" : "off"}`; }
-            dot.parentElement.innerHTML = `<span class="dot ${e.target.checked ? "on" : "off"}" data-dot></span> ${e.target.checked ? "监控中" : "已停止"}`;
+            dot.parentElement.innerHTML = `<span class="dot ${e.target.checked ? "on" : "off"}" data-dot></span> ${e.target.checked ? "Monitoring" : "Stopped"}`;
         };
         this.modal.querySelector('[data-act="dir"]').onchange = (e) => {
             const w = this._getWidget("watch_directory");
@@ -2200,7 +2200,7 @@ class TimelineEditor {
 
         const vLabel = document.createElement("div");
         vLabel.className = "bsai-pp-track-section-label";
-        vLabel.innerHTML = `<span>📹 视频轨道</span>`;
+        vLabel.innerHTML = `<span>📹 Video Track</span>`;
         container.appendChild(vLabel);
         for (let i = videoTracks.length - 1; i >= 0; i--) {
             container.appendChild(this._createTrackRow("video", i, videoTracks[i]));
@@ -2208,7 +2208,7 @@ class TimelineEditor {
 
         const aLabel = document.createElement("div");
         aLabel.className = "bsai-pp-track-section-label";
-        aLabel.innerHTML = `<span>🎵 音频轨道</span>`;
+        aLabel.innerHTML = `<span>🎵 Audio Track</span>`;
         container.appendChild(aLabel);
         for (let i = 0; i < audioTracks.length; i++) {
             container.appendChild(this._createTrackRow("audio", i, audioTracks[i]));
@@ -2224,7 +2224,7 @@ class TimelineEditor {
         if (clips.length === 0) {
             const empty = document.createElement("div");
             empty.style.cssText = "color:#555;font-size:13px;padding:40px;text-align:center;";
-            empty.textContent = "暂无视频片段，请运行工作流生成视频或手动导入";
+            empty.textContent = "No video clips yet. Run a workflow to generate videos or import them manually";
             container.appendChild(empty);
         }
         // Auto-load thumbnails after timeline render so they always appear
@@ -2338,7 +2338,7 @@ class TimelineEditor {
             this._pausedClip = null;
             this._pausedVideoTime = null;
             const btn = this.modal.querySelector("#bsai-pp-play-btn");
-            if (btn) btn.textContent = "⏸️ 暂停";
+            if (btn) btn.textContent = "⏸️ Pause";
             // Show overlay for restored playback (constrained to timeline section)
             this._positionTimelineOverlay();
             this._playNextClip();
@@ -2377,17 +2377,17 @@ class TimelineEditor {
         if (isVideo) {
             controls = `
                 <div class="bsai-pp-track-controls">
-                    <button class="bsai-pp-track-btn ${trackInfo.visible !== false ? "active" : ""}" data-track-act="visible" title="显示/隐藏">👁</button>
-                    <button class="bsai-pp-track-btn ${trackInfo.locked ? "active" : ""}" data-track-act="lock" title="锁定">${trackInfo.locked ? "🔒" : "🔓"}</button>
-                    <button class="bsai-pp-track-btn danger" data-track-act="remove" title="删除轨道">✕</button>
+                    <button class="bsai-pp-track-btn ${trackInfo.visible !== false ? "active" : ""}" data-track-act="visible" title="Show / Hide">👁</button>
+                    <button class="bsai-pp-track-btn ${trackInfo.locked ? "active" : ""}" data-track-act="lock" title="Lock">${trackInfo.locked ? "🔒" : "🔓"}</button>
+                    <button class="bsai-pp-track-btn danger" data-track-act="remove" title="Delete Track">✕</button>
                 </div>`;
         } else {
             controls = `
                 <div class="bsai-pp-track-controls">
-                    <button class="bsai-pp-track-btn ${trackInfo.muted ? "active" : ""}" data-track-act="mute" title="静音">🔇</button>
-                    <button class="bsai-pp-track-btn ${trackInfo.solo ? "active" : ""}" data-track-act="solo" title="独奏">🎧</button>
-                    <button class="bsai-pp-track-btn ${trackInfo.locked ? "active" : ""}" data-track-act="lock" title="锁定">${trackInfo.locked ? "🔒" : "🔓"}</button>
-                    <button class="bsai-pp-track-btn danger" data-track-act="remove" title="删除轨道">✕</button>
+                    <button class="bsai-pp-track-btn ${trackInfo.muted ? "active" : ""}" data-track-act="mute" title="Mute">🔇</button>
+                    <button class="bsai-pp-track-btn ${trackInfo.solo ? "active" : ""}" data-track-act="solo" title="Solo">🎧</button>
+                    <button class="bsai-pp-track-btn ${trackInfo.locked ? "active" : ""}" data-track-act="lock" title="Lock">${trackInfo.locked ? "🔒" : "🔓"}</button>
+                    <button class="bsai-pp-track-btn danger" data-track-act="remove" title="Delete Track">✕</button>
                 </div>`;
         }
         header.innerHTML = `<div class="bsai-pp-track-header-row"><span class="bsai-pp-track-name ${isVideo ? "video" : "audio"}">${trackName}</span></div>${controls}`;
@@ -2404,7 +2404,7 @@ class TimelineEditor {
         content.style.minWidth = rulerWidth + "px";
         const trackClips = this._getClipsForTrack(trackType, trackIndex);
         if (trackClips.length === 0) {
-            content.innerHTML = `<span class="bsai-pp-track-empty">空轨道</span>`;
+            content.innerHTML = `<span class="bsai-pp-track-empty">Empty Track</span>`;
         } else {
             let currentTime = 0;
             trackClips.forEach((clip, i) => {
@@ -2430,11 +2430,11 @@ class TimelineEditor {
                 arrow.style.left = (block.offsetLeft - 14) + "px";
                 const transIn = trackClips[i].transition_in || "cut";
                 const icon = isVideo ? (TRANSITION_ICONS[transIn] || "🌫️") : "🎵";
-                const label = isVideo ? (TRANSITION_LABELS[transIn] || "淡入淡出") : "音频过渡";
+                const label = isVideo ? (TRANSITION_LABELS[transIn] || "Fade") : "Audio Transition";
                 arrow.innerHTML = `<span class="arrow-icon">${icon}</span><span class="arrow-label">${label}</span>`;
                 arrow.title = isVideo
-                    ? `点击切换过渡效果 (当前: ${TRANSITION_LABELS[transIn] || "淡入淡出"})`
-                    : `音频过渡 (当前: ${TRANSITION_LABELS[transIn] || "淡入淡出"})`;
+                    ? `Click to change transition (current: ${TRANSITION_LABELS[transIn] || "Fade"})`
+                    : `Audio transition (current: ${TRANSITION_LABELS[transIn] || "Fade"})`;
                 arrow.onclick = (e) => { e.stopPropagation(); this._showTransitionPopup(arrow, clipIdx); };
                 content.appendChild(arrow);
             }
@@ -2488,8 +2488,8 @@ class TimelineEditor {
         } else if (action === "solo" && trackType === "audio") {
             track.solo = !track.solo;
         } else if (action === "remove") {
-            if (track.locked) { this._toast("轨道已锁定，请先解锁再删除", "error"); return; }
-            if (tracks.length <= 1) { this._toast("至少保留一个轨道", "info"); return; }
+            if (track.locked) { this._toast("Track is locked, unlock it before deleting", "error"); return; }
+            if (tracks.length <= 1) { this._toast("At least one track must remain", "info"); return; }
             const trackClips = this._getClipsForTrack(trackType, trackIndex);
             if (trackClips.length > 0) {
                 for (const clip of trackClips) {
@@ -2505,7 +2505,7 @@ class TimelineEditor {
                 if (c.track_type === trackType && c.track_index > trackIndex) c.track_index--;
             }
             tracks.splice(trackIndex, 1);
-            this._toast(`已删除轨道 ${track.name} (${trackClips.length}个片段)`, "success");
+            this._toast(`Deleted track ${track.name} (${trackClips.length} clips)`, "success");
         }
         this._save();
         this._renderTimeline();
@@ -2517,7 +2517,7 @@ class TimelineEditor {
         this.td.video_tracks.push({ name: `V${idx + 1}`, locked: false, visible: true });
         this._save();
         this._renderTimeline();
-        this._toast(`已添加视频轨道 V${idx + 1}`, "success");
+        this._toast(`Added video track V${idx + 1}`, "success");
     }
 
     _addAudioTrack() {
@@ -2526,7 +2526,7 @@ class TimelineEditor {
         this.td.audio_tracks.push({ name: `A${idx + 1}`, locked: false, muted: false, solo: false });
         this._save();
         this._renderTimeline();
-        this._toast(`已添加音频轨道 A${idx + 1}`, "success");
+        this._toast(`Added audio track A${idx + 1}`, "success");
     }
 
     async _openSourceDirectory() {
@@ -2548,25 +2548,25 @@ class TimelineEditor {
             }
         }
         if (!sourcePath) {
-            this._toast("时间轴上没有视频文件", "warning");
+            this._toast("No video files on the timeline", "warning");
             return;
         }
         try {
             const resp = await api.fetchApi(`/bsai_premiere_pro/open_explorer?path=${encodeURIComponent(sourcePath)}`);
             const text = await resp.text();
             if (!text) {
-                this._toast("服务器无响应，请重启 ComfyUI 后重试", "warning");
+                this._toast("Server is not responding, restart ComfyUI and retry", "warning");
                 return;
             }
             let data;
             try { data = JSON.parse(text); } catch { data = { error: text }; }
             if (data.error) {
-                this._toast(`无法打开目录: ${data.error}`, "error");
+                this._toast(`Cannot open directory: ${data.error}`, "error");
             } else {
-                this._toast(`已打开源目录: ${sourcePath}`, "success");
+                this._toast(`Opened source directory: ${sourcePath}`, "success");
             }
         } catch (e) {
-            this._toast(`打开目录失败: ${e.message || e}`, "error");
+            this._toast(`Failed to open directory: ${e.message || e}`, "error");
         }
     }
 
@@ -2589,10 +2589,10 @@ class TimelineEditor {
                 return /\.(mp4|avi|mov|mkv|webm|flv|wmv|m4v|mpg|mpeg|ts|3gp|mp3|wav|aac|flac|ogg|m4a|wma|opus|png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(name);
             });
             if (mediaFiles.length === 0) {
-                this._toast("所选目录中没有媒体文件", "error");
+                this._toast("No media files in the selected directory", "error");
                 return;
             }
-            this._toast(`正在从目录导入 ${mediaFiles.length} 个媒体文件...`, "info");
+            this._toast(`Importing ${mediaFiles.length} media files from directory...`, "info");
             // Save current timeline state to directory_history
             if (!this.td.directory_history) this.td.directory_history = {};
             if (oldDir) {
@@ -2636,9 +2636,9 @@ class TimelineEditor {
                 if (dirInput) dirInput.value = uploadDir;
                 const w = this._getWidget("watch_directory");
                 if (w) w.value = uploadDir;
-                this._toast(`成功从目录导入 ${imported} 个媒体文件`, "success");
+                this._toast(`Successfully imported ${imported} media files from directory`, "success");
             } else {
-                this._toast("没有成功导入任何文件", "error");
+                this._toast("No files were imported", "error");
             }
             this._autoLinkClips();
             this._save();
@@ -2651,7 +2651,7 @@ class TimelineEditor {
         // Remove existing dropdown
         document.querySelectorAll(".bsai-pp-history-dropdown").forEach(d => d.remove());
         if (!this.td.directory_history || Object.keys(this.td.directory_history).length === 0) {
-            this._toast("暂无历史目录记录", "info");
+            this._toast("No directory history yet", "info");
             return;
         }
         const dropdown = document.createElement("div");
@@ -2661,8 +2661,8 @@ class TimelineEditor {
         // Add current directory
         const currentClips = (this.td.clips || []).filter(c => c.track_type === "video").length;
         html += `<div class="bsai-pp-history-item" data-dir="${escapeHtml(currentDir)}" style="background:#2a3a4a;">
-            <span>📍</span><span>${escapeHtml(currentDir || "未设置")}</span>
-            <span class="hist-clips">${currentClips} 片段 (当前)</span>
+            <span>📍</span><span>${escapeHtml(currentDir || "Not set")}</span>
+            <span class="hist-clips">${currentClips} clips (current)</span>
         </div>`;
         // Add history entries
         for (const [dir, state] of Object.entries(this.td.directory_history)) {
@@ -2670,8 +2670,8 @@ class TimelineEditor {
             const clipCount = (state.clips || []).filter(c => c.track_type === "video").length;
             html += `<div class="bsai-pp-history-item" data-dir="${escapeHtml(dir)}">
                 <span>📁</span><span>${escapeHtml(dir)}</span>
-                <span class="hist-clips">${clipCount} 片段</span>
-                <span class="hist-del" data-del-dir="${escapeHtml(dir)}" title="删除历史">✕</span>
+                <span class="hist-clips">${clipCount} clips</span>
+                <span class="hist-del" data-del-dir="${escapeHtml(dir)}" title="Delete history">✕</span>
             </div>`;
         }
         dropdown.innerHTML = html;
@@ -2689,7 +2689,7 @@ class TimelineEditor {
                     delete this.td.directory_history[delDir];
                     this._save();
                     dropdown.remove();
-                    this._toast(`已删除历史记录: ${delDir}`, "info");
+                    this._toast(`Deleted history: ${delDir}`, "info");
                     return;
                 }
                 const dir = item.getAttribute("data-dir");
@@ -2731,12 +2731,12 @@ class TimelineEditor {
             this.td.deleted_files = JSON.parse(JSON.stringify(hist.deleted_files || []));
             this.td.video_tracks = JSON.parse(JSON.stringify(hist.video_tracks || [{ name: "V1", locked: false, visible: true }]));
             this.td.audio_tracks = JSON.parse(JSON.stringify(hist.audio_tracks || [{ name: "A1", locked: false, muted: false, solo: false }]));
-            this._toast(`已切换到: ${newDir} (恢复 ${this.td.clips.filter(c=>c.track_type==="video").length} 个片段)`, "success");
+            this._toast(`Switched to: ${newDir} (restored ${this.td.clips.filter(c=>c.track_type==="video").length} clips)`, "success");
         } else {
             this.td.clips = [];
             this.td.known_files = [];
             this.td.deleted_files = [];
-            this._toast(`已切换到新目录: ${newDir}，正在扫描...`, "info");
+            this._toast(`Switched to new directory: ${newDir}, scanning...`, "info");
         }
         this.selectedIndex = -1;
         const dirInput = this.modal.querySelector('[data-act="dir"]');
@@ -2757,7 +2757,7 @@ class TimelineEditor {
         }
         const selected = await browseFilesDialog(initialPath);
         if (!selected || selected.length === 0) return;
-        this._toast(`正在导入 ${selected.length} 个文件...`, "info");
+        this._toast(`Importing ${selected.length} files...`, "info");
         let imported = 0;
         for (const file of selected) {
             try {
@@ -2766,7 +2766,7 @@ class TimelineEditor {
                     const metaResp = await api.fetchApi(`/bsai_premiere_pro/metadata?file=${encodeURIComponent(file.path)}`);
                     const meta = await metaResp.json();
                     if (meta.error) {
-                        this._toast(`无法读取 ${file.name}: ${meta.error}`, "error");
+                        this._toast(`Cannot read ${file.name}: ${meta.error}`, "error");
                         continue;
                     }
                     await this._addClipFromFile({
@@ -2868,14 +2868,14 @@ class TimelineEditor {
                     imported++;
                 }
             } catch (e) {
-                this._toast(`导入 ${file.name} 失败: ${e.message}`, "error");
+                this._toast(`Failed to import ${file.name}: ${e.message}`, "error");
             }
         }
         if (imported > 0) {
             this._autoLinkClips();
             this._save();
             this._renderAll();
-            this._toast(`成功导入 ${imported} 个文件`, "success");
+            this._toast(`Successfully imported ${imported} files`, "success");
         }
     }
 
@@ -2893,7 +2893,7 @@ class TimelineEditor {
         const btn = this.modal.querySelector("#bsai-pp-scissor-btn");
         if (btn) {
             btn.classList.toggle("scissor-active", this.scissorMode);
-            btn.textContent = this.scissorMode ? "✂️ 剪刀(开)" : "✂️ 剪刀";
+            btn.textContent = this.scissorMode ? "✂️ Scissors (On)" : "✂️ Scissors";
         }
         if (this.scissorMode) {
             this.batchMode = false;
@@ -2901,12 +2901,12 @@ class TimelineEditor {
             this._removeBatchBar();
             const batchBtn = this.modal.querySelector("#bsai-pp-batch-btn");
             if (batchBtn) {
-                batchBtn.textContent = "☑ 批量选择";
+                batchBtn.textContent = "☑ Batch Select";
                 batchBtn.classList.remove("bsai-pp-btn-danger");
             }
         }
         this._renderTimeline();
-        this._toast(this.scissorMode ? "剪刀模式已开启，点击片段进行分割" : "剪刀模式已关闭", this.scissorMode ? "info" : "success");
+        this._toast(this.scissorMode ? "Scissor mode on, click a clip to split it" : "Scissor mode off", this.scissorMode ? "info" : "success");
     }
 
     _isTrackLocked(clip) {
@@ -2924,7 +2924,7 @@ class TimelineEditor {
         const clipDur = trimEnd - trimStart;
         const splitOffset = splitTime - trimStart;
         if (splitOffset < 0.2 || splitOffset > clipDur - 0.2) {
-            this._toast("暂停位置太靠近片段边缘，无法分割", "info");
+            this._toast("Paused position is too close to a clip edge to split", "info");
             // Clear paused state even if can't split
             this._pausedClip = null;
             this._pausedVideoTime = null;
@@ -2935,7 +2935,7 @@ class TimelineEditor {
         const linkedAudio = clip.linked_id ? this.td.clips.find(c => c.id === clip.linked_id) : null;
         const isAudioLocked = linkedAudio ? this._isTrackLocked(linkedAudio) : false;
         if (isVideoLocked && (!linkedAudio || isAudioLocked)) {
-            this._toast("相关轨道均已锁定，无法分割", "error");
+            this._toast("All related tracks are locked, cannot split", "error");
             this._pausedClip = null;
             this._pausedVideoTime = null;
             return;
@@ -2986,7 +2986,7 @@ class TimelineEditor {
         this._pausedVideoTime = null;
         this._save();
         this._renderAll();
-        this._toast("已在暂停位置分割片段", "success");
+        this._toast("Clip split at the paused position", "success");
     }
 
     _togglePlayback() {
@@ -3001,7 +3001,7 @@ class TimelineEditor {
         const videoClips = (this.td.clips || [])
             .filter(c => c.track_type === "video" && c.video_enabled !== false);
         if (videoClips.length === 0) {
-            this._toast("时间轴上没有可播放的视频片段", "error");
+            this._toast("No playable video clips on the timeline", "error");
             return;
         }
         // Remove timeline playhead to avoid dual playheads during playback
@@ -3019,7 +3019,7 @@ class TimelineEditor {
                 this._pausedClip = null;
                 this._pausedVideoTime = null;
                 const btn = this.modal.querySelector("#bsai-pp-play-btn");
-                if (btn) btn.textContent = "⏸️ 暂停";
+                if (btn) btn.textContent = "⏸️ Pause";
                 if (overlayVideo && overlayVideo.src) {
                     overlayVideo.play().catch(() => {});
                     const inlineAudio = this.modal.querySelector(".bsai-pp-inline-audio");
@@ -3091,7 +3091,7 @@ class TimelineEditor {
         this._pausedVideoTime = null;
         this._previewAtPlayhead = false;
         const btn = this.modal.querySelector("#bsai-pp-play-btn");
-        if (btn) btn.textContent = "⏸️ 暂停";
+        if (btn) btn.textContent = "⏸️ Pause";
         // Show timeline preview overlay for playback (constrained to timeline section)
         this._positionTimelineOverlay();
         this._playNextClip();
@@ -3346,7 +3346,7 @@ class TimelineEditor {
 
             const footerInfo = this.modal.querySelector("[data-footer-info]");
             if (footerInfo) {
-                footerInfo.textContent = `▶ 播放中: ${clip.file_name} (${this._playClipIndex + 1}/${this._playClips.length})`;
+                footerInfo.textContent = `▶ Playing: ${clip.file_name} (${this._playClipIndex + 1}/${this._playClips.length})`;
             }
             return;
         }
@@ -3554,7 +3554,7 @@ class TimelineEditor {
 
         const footerInfo = this.modal.querySelector("[data-footer-info]");
         if (footerInfo) {
-            footerInfo.textContent = `▶ 播放中: ${clip.file_name} (${this._playClipIndex + 1}/${this._playClips.length})`;
+            footerInfo.textContent = `▶ Playing: ${clip.file_name} (${this._playClipIndex + 1}/${this._playClips.length})`;
         }
     }
 
@@ -3587,10 +3587,10 @@ class TimelineEditor {
         const inlineAudio = this.modal.querySelector(".bsai-pp-inline-audio");
         if (inlineAudio) inlineAudio.pause();
         const btn = this.modal.querySelector("#bsai-pp-play-btn");
-        if (btn) btn.textContent = "▶️ 播放";
+        if (btn) btn.textContent = "▶️ Play";
         const footerInfo = this.modal.querySelector("[data-footer-info]");
         if (footerInfo) {
-            footerInfo.textContent = `⏸ 已暂停 (${this._playClipIndex + 1}/${this._playClips?.length || 0})`;
+            footerInfo.textContent = `⏸ Paused (${this._playClipIndex + 1}/${this._playClips?.length || 0})`;
         }
     }
 
@@ -3646,7 +3646,7 @@ class TimelineEditor {
             if (stopInfo) stopInfo.textContent = "";
         }
         const btn = this.modal.querySelector("#bsai-pp-play-btn");
-        if (btn) btn.textContent = "▶️ 播放";
+        if (btn) btn.textContent = "▶️ Play";
         const footerInfo = this.modal.querySelector("[data-footer-info]");
         if (footerInfo) footerInfo.textContent = "";
     }
@@ -3711,7 +3711,7 @@ class TimelineEditor {
         const ph = document.createElement("div");
         ph.className = "bsai-pp-timeline-playhead";
         ph.style.left = x + "px";
-        ph.title = `播放头: ${formatTime(this._playheadTime)} (双击清除)`;
+        ph.title = `Playhead: ${formatTime(this._playheadTime)} (double-click to clear)`;
         ph.addEventListener("dblclick", (e) => {
             e.stopPropagation();
             this._playheadTime = null;
@@ -3833,7 +3833,7 @@ class TimelineEditor {
 
     _cutAtPlayhead() {
         if (this._playheadTime === null || this._playheadTime === undefined) {
-            this._toast("请先点击标尺设置播放头位置", "info");
+            this._toast("Click the ruler first to set the playhead position", "info");
             return;
         }
         const cutTime = this._playheadTime;
@@ -3853,9 +3853,9 @@ class TimelineEditor {
         if (cutCount > 0) {
             this._save();
             this._renderAll();
-            this._toast(`已在播放头位置剪断 ${cutCount} 个片段`, "success");
+            this._toast(`Cut ${cutCount} clips at the playhead`, "success");
         } else {
-            this._toast("播放头位置没有可剪断的视频片段", "info");
+            this._toast("No video clips to cut at the playhead", "info");
         }
     }
 
@@ -3936,12 +3936,12 @@ class TimelineEditor {
             if (this.scissorMode) {
                 this.scissorMode = false;
                 const sBtn = this.modal.querySelector("#bsai-pp-scissor-btn");
-                if (sBtn) { sBtn.classList.remove("scissor-active"); sBtn.textContent = "✂️ 剪刀"; }
+                if (sBtn) { sBtn.classList.remove("scissor-active"); sBtn.textContent = "✂️ Scissors"; }
             }
         }
         const btn = this.modal.querySelector("#bsai-pp-batch-btn");
         if (btn) {
-            btn.textContent = this.batchMode ? "✕ 退出批量" : "☑ 批量选择";
+            btn.textContent = this.batchMode ? "✕ Exit Batch" : "☑ Batch Select";
             btn.classList.toggle("bsai-pp-btn-danger", this.batchMode);
         }
         this._renderTimeline();
@@ -3954,14 +3954,14 @@ class TimelineEditor {
         this._updateUpscaleBtn();
         this._renderEditPanel();
         this._save();
-        this._toast(!cur ? "4K超分已开启（渲染时自动高清修复）" : "4K超分已关闭", !cur ? "success" : "info");
+        this._toast(!cur ? "4K upscale enabled (auto HD repair on render)" : "4K upscale disabled", !cur ? "success" : "info");
     }
 
     _updateUpscaleBtn() {
         const btn = this.modal.querySelector("#bsai-pp-upscale-btn");
         if (!btn) return;
         const enabled = this._getWidgetValue("upscale_enable", false);
-        btn.textContent = enabled ? "🎞️ 4K超分: 开" : "🎞️ 4K超分: 关";
+        btn.textContent = enabled ? "🎞️ 4K Upscale: On" : "🎞️ 4K Upscale: Off";
         btn.style.background = enabled ? "#1b5e20" : "#3a3a3a";
         btn.style.borderColor = enabled ? "#4caf50" : "#555";
         btn.style.color = enabled ? "#a5d6a7" : "#ddd";
@@ -3981,11 +3981,11 @@ class TimelineEditor {
         const count = this.batchSelected.size;
         const total = (this.td.clips || []).length;
         bar.innerHTML = `
-            <span class="bsai-pp-batch-info">已选 <strong>${count}</strong> / ${total} 个片段</span>
-            <button class="bsai-pp-btn" data-batch-act="select-all">${count === total ? "取消全选" : "全选"}</button>
-            <button class="bsai-pp-btn" data-batch-act="invert">🔄 反选</button>
-            <button class="bsai-pp-btn bsai-pp-btn-danger" data-batch-act="delete" ${count === 0 ? "disabled" : ""}>🗑 删除选中 (${count})</button>
-            <button class="bsai-pp-btn" data-batch-act="exit">退出批量</button>`;
+            <span class="bsai-pp-batch-info"><strong>${count}</strong> / ${total} clips selected</span>
+            <button class="bsai-pp-btn" data-batch-act="select-all">${count === total ? "Deselect All" : "Select All"}</button>
+            <button class="bsai-pp-btn" data-batch-act="invert">🔄 Invert</button>
+            <button class="bsai-pp-btn bsai-pp-btn-danger" data-batch-act="delete" ${count === 0 ? "disabled" : ""}>🗑 Delete Selected (${count})</button>
+            <button class="bsai-pp-btn" data-batch-act="exit">Exit Batch</button>`;
         bar.querySelector('[data-batch-act="select-all"]').onclick = () => {
             if (this.batchSelected.size === total) {
                 this.batchSelected.clear();
@@ -4014,7 +4014,7 @@ class TimelineEditor {
     }
 
     _deleteBatchClips() {
-        if (this.batchSelected.size === 0) { this._toast("未选中任何片段", "info"); return; }
+        if (this.batchSelected.size === 0) { this._toast("No clips selected", "info"); return; }
         const indices = [...this.batchSelected].sort((a, b) => b - a);
         const overlay = document.createElement("div");
         overlay.className = "bsai-pp-dialog-overlay";
@@ -4023,15 +4023,15 @@ class TimelineEditor {
         dialog.style.minWidth = "380px";
         const sampleNames = indices.slice(0, 5).map(i => this.td.clips[i]?.file_name || "").filter(Boolean);
         dialog.innerHTML = `
-            <h3>🗑 批量删除确认</h3>
+            <h3>🗑 Confirm Batch Delete</h3>
             <div style="color:#ccc;font-size:13px;padding:10px 0;">
-                确认删除选中的 <strong style="color:#ff6b6b;">${indices.length}</strong> 个片段？<br>
-                ${sampleNames.length > 0 ? `<div style="margin-top:8px;color:#888;font-size:12px;">${sampleNames.map(n => `• ${escapeHtml(n)}`).join("<br>")}${indices.length > 5 ? `<br>...等 ${indices.length} 个` : ""}</div>` : ""}
-                <div style="margin-top:8px;color:#ff9800;font-size:12px;">关联的音视频片段将一并删除</div>
+                Delete the selected <strong style="color:#ff6b6b;">${indices.length}</strong> clips?<br>
+                ${sampleNames.length > 0 ? `<div style="margin-top:8px;color:#888;font-size:12px;">${sampleNames.map(n => `• ${escapeHtml(n)}`).join("<br>")}${indices.length > 5 ? `<br>...and ${indices.length} more` : ""}</div>` : ""}
+                <div style="margin-top:8px;color:#ff9800;font-size:12px;">Linked audio/video clips will be deleted together</div>
             </div>
             <div style="display:flex;gap:8px;justify-content:flex-end;">
-                <button class="bsai-pp-btn" data-cancel>取消</button>
-                <button class="bsai-pp-btn bsai-pp-btn-danger" data-confirm>确认删除</button>
+                <button class="bsai-pp-btn" data-cancel>Cancel</button>
+                <button class="bsai-pp-btn bsai-pp-btn-danger" data-confirm>Confirm Delete</button>
             </div>`;
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
@@ -4081,13 +4081,13 @@ class TimelineEditor {
             this._renderAll();
             this._renderBatchBar();
             overlay.remove();
-            this._toast(`已删除 ${clipIdsToDelete.size} 个片段`, "success");
+            this._toast(`Deleted ${clipIdsToDelete.size} clips`, "success");
         };
     }
 
     _clearAllClips() {
         const clips = this.td.clips || [];
-        if (clips.length === 0) { this._toast("时间轴上没有片段", "info"); return; }
+        if (clips.length === 0) { this._toast("No clips on the timeline", "info"); return; }
         const vCount = clips.filter(c => c.track_type === "video").length;
         const aCount = clips.filter(c => c.track_type === "audio").length;
         const overlay = document.createElement("div");
@@ -4096,16 +4096,16 @@ class TimelineEditor {
         dialog.className = "bsai-pp-import-dialog";
         dialog.style.minWidth = "380px";
         dialog.innerHTML = `
-            <h3>🗑 清空全部片段</h3>
+            <h3>🗑 Clear All Clips</h3>
             <div style="color:#ccc;font-size:13px;padding:10px 0;">
-                将删除所有轨道上的全部片段：<br>
-                📹 ${vCount} 个视频片段<br>
-                🎵 ${aCount} 个音频片段<br>
-                <span style="color:#d35454;">此操作不可撤销</span>
+                This will delete every clip on all tracks:<br>
+                📹 ${vCount} video clips<br>
+                🎵 ${aCount} audio clips<br>
+                <span style="color:#d35454;">This action cannot be undone</span>
             </div>
             <div style="display:flex;gap:8px;justify-content:flex-end;">
-                <button class="bsai-pp-btn" data-cancel>取消</button>
-                <button class="bsai-pp-btn bsai-pp-btn-danger" data-confirm>确认清空</button>
+                <button class="bsai-pp-btn" data-cancel>Cancel</button>
+                <button class="bsai-pp-btn bsai-pp-btn-danger" data-confirm>Confirm Clear</button>
             </div>`;
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
@@ -4124,7 +4124,7 @@ class TimelineEditor {
             this._save();
             this._renderAll();
             overlay.remove();
-            this._toast("已清空全部片段", "success");
+            this._toast("All clips cleared", "success");
         };
     }
 
@@ -4143,17 +4143,17 @@ class TimelineEditor {
             block.style.width = width + "px";
             block.innerHTML = `
                 <div class="bsai-pp-clip-thumb" style="background:#1a1a1a;border:2px dashed #444;display:flex;align-items:center;justify-content:center;">
-                    <span class="placeholder" style="color:#444;font-size:11px;">⬚ 空位</span>
+                    <span class="placeholder" style="color:#444;font-size:11px;">⬚ Empty</span>
                 </div>
                 <div class="bsai-pp-clip-info">
-                    <div class="bsai-pp-clip-name" style="color:#555;">(空位)</div>
+                    <div class="bsai-pp-clip-name" style="color:#555;">(Empty)</div>
                     <div class="bsai-pp-clip-dur" style="color:#444;">${formatTime(clipDur)}</div>
                 </div>`;
             // Allow clicking gap to remove it (fill gap)
             block.onclick = (e) => {
                 e.stopPropagation();
                 if (this._isBoxDrag) return;
-                if (confirm("移除此空位？后续片段会前移填充。")) {
+                if (confirm("Remove this empty slot? Following clips will shift forward.")) {
                     this.td.clips = this.td.clips.filter((c, i) => i !== clipIndex);
                     if (this.selectedIndex >= this.td.clips.length) this.selectedIndex = -1;
                     this._save();
@@ -4176,17 +4176,17 @@ class TimelineEditor {
         block.style.width = width + "px";
         let badges = "";
         if (clip.linked_id) {
-            badges += `<span class="bsai-pp-clip-badge" style="color:#ffa726;" title="音视频已链接（点击编辑面板可解除）">🔗</span>`;
+            badges += `<span class="bsai-pp-clip-badge" style="color:#ffa726;" title="Audio/video linked (click in the edit panel to unlink)">🔗</span>`;
             const linked = this.td.clips.find(c => c.id === clip.linked_id);
             if (linked) {
                 const lDur = (linked.trim_end || linked.duration || 0) - (linked.trim_start || 0);
                 if (Math.abs(lDur - clipDur) > 0.01) {
-                    badges += `<span class="bsai-pp-clip-badge" style="color:#ff9800;" title="音视频时长不一致">⚠</span>`;
+                    badges += `<span class="bsai-pp-clip-badge" style="color:#ff9800;" title="Audio/video durations differ">⚠</span>`;
                 }
             }
         }
         if (isVideo && clip.upscale_enable === true) {
-            badges += `<span class="bsai-pp-clip-badge" style="background:linear-gradient(135deg,#e0b050,#ff9800);color:#000;font-weight:700;border-radius:3px;padding:0 3px;" title="此片段已开启4K超分">4K</span>`;
+            badges += `<span class="bsai-pp-clip-badge" style="background:linear-gradient(135deg,#e0b050,#ff9800);color:#000;font-weight:700;border-radius:3px;padding:0 3px;" title="4K upscale is enabled for this clip">4K</span>`;
         }
         if (!isVideo) {
             if (clip.audio_replacement) badges += `<span class="bsai-pp-clip-badge audio-replaced">🎵</span>`;
@@ -4373,7 +4373,7 @@ class TimelineEditor {
     _splitClip(clip, clipIndex, event) {
         // Check if this clip's track is locked
         if (this._isTrackLocked(clip)) {
-            this._toast("该轨道已锁定，无法分割", "error");
+            this._toast("This track is locked, cannot split", "error");
             return;
         }
         const block = event.currentTarget;
@@ -4386,7 +4386,7 @@ class TimelineEditor {
         const splitOffset = clickX / pps;
         const splitTime = (clip.trim_start || 0) + splitOffset;
         if (splitOffset < 0.2 || splitOffset > clipDur - 0.2) {
-            this._toast("请在片段中间位置点击进行分割", "info");
+            this._toast("Click the middle of a clip to split it", "info");
             return;
         }
         // Check linked audio track locking
@@ -4430,7 +4430,7 @@ class TimelineEditor {
         }
         this._save();
         this._renderAll();
-        this._toast("片段已分割", "success");
+        this._toast("Clip split", "success");
     }
 
     _attachBoxSelection(contentEl, trackType, trackIndex) {
@@ -4532,7 +4532,7 @@ class TimelineEditor {
     }
 
     _deleteBoxSelected() {
-        if (this.boxSelected.size === 0) { this._toast("未选中任何片段", "info"); return; }
+        if (this.boxSelected.size === 0) { this._toast("No clips selected", "info"); return; }
         const indices = [...this.boxSelected].sort((a, b) => b - a);
         const clipIdsToDelete = new Set();
         const fileNamesToDelete = new Set();
@@ -4564,7 +4564,7 @@ class TimelineEditor {
             fileNamesToDelete.add(clip.file_name);
         }
         if (skippedLocked > 0) {
-            this._toast(`${skippedLocked} 个片段在锁定轨道上，已跳过`, "info");
+            this._toast(`${skippedLocked} clips on locked tracks were skipped`, "info");
         }
         if (!this.td.deleted_files) this.td.deleted_files = [];
         for (const fn of fileNamesToDelete) {
@@ -4577,7 +4577,7 @@ class TimelineEditor {
         this._save();
         this._renderAll();
         this._removeBoxBar();
-        this._toast(`已删除 ${clipIdsToDelete.size} 个片段（含关联音视频）`, "success");
+        this._toast(`Deleted ${clipIdsToDelete.size} clips (with linked audio/video)`, "success");
     }
 
     _renderBoxBar() {
@@ -4596,11 +4596,11 @@ class TimelineEditor {
         }
         const count = this.boxSelected.size;
         bar.innerHTML = `
-            <span class="bsai-pp-batch-info">框选 <strong>${count}</strong> 个片段</span>
-            <button class="bsai-pp-btn" data-box-act="move-left">◀ 左移</button>
-            <button class="bsai-pp-btn" data-box-act="move-right">右移 ▶</button>
-            <button class="bsai-pp-btn bsai-pp-btn-danger" data-box-act="delete">🗑 删除选中</button>
-            <button class="bsai-pp-btn" data-box-act="clear">取消选择</button>`;
+            <span class="bsai-pp-batch-info">Boxed <strong>${count}</strong> clips</span>
+            <button class="bsai-pp-btn" data-box-act="move-left">◀ Move Left</button>
+            <button class="bsai-pp-btn" data-box-act="move-right">Move Right ▶</button>
+            <button class="bsai-pp-btn bsai-pp-btn-danger" data-box-act="delete">🗑 Delete Selected</button>
+            <button class="bsai-pp-btn" data-box-act="clear">Clear Selection</button>`;
         bar.querySelector('[data-box-act="move-left"]').onclick = () => {
             const indices = [...this.boxSelected].sort((a, b) => a - b);
             for (const idx of indices) this._moveClip(idx, -1);
@@ -4637,7 +4637,7 @@ class TimelineEditor {
         const popup = document.createElement("div");
         popup.className = "bsai-pp-transition-popup";
         popup.innerHTML = `
-            <div class="popup-title">切换过渡效果</div>
+            <div class="popup-title">Change Transition</div>
             ${TRANSITIONS.map(t => `
                 <div class="bsai-pp-transition-option ${t === currentTrans ? "selected" : ""}" data-trans="${t}">
                     <span class="opt-icon">${TRANSITION_ICONS[t]}</span>
@@ -4676,7 +4676,7 @@ class TimelineEditor {
                 this._renderTimeline();
                 this._renderEditPanel();
                 popup.remove();
-                this._toast(`过渡效果已切换为: ${TRANSITION_LABELS[newTrans]}`, "success");
+                this._toast(`Transition changed to: ${TRANSITION_LABELS[newTrans]}`, "success");
             };
         });
         const closeHandler = (e) => {
@@ -4793,57 +4793,57 @@ class TimelineEditor {
             const _umW = this._getWidget("upscale_model");
             const _umOpts = (_umW?.options?.values && _umW.options.values.length) ? _umW.options.values : [upscaleModel];
             const upscaleModelOptions = _umOpts.map(m => `<option value="${escapeHtml(m)}" ${m === upscaleModel ? "selected" : ""}>${escapeHtml(m)}</option>`).join("");
-            const _faceOpts = ["Off", "GFPGANv1.4", "CodeFormer", "小脸增强(CodeFormer)"];
+            const _faceOpts = ["Off", "GFPGANv1.4", "CodeFormer", "SmallFace Enhance (CodeFormer)"];
             const upscaleFaceOptions = _faceOpts.map(f => `<option value="${escapeHtml(f)}" ${f === upscaleFace ? "selected" : ""}>${escapeHtml(f)}</option>`).join("");
             panel.innerHTML = `
                 <div class="bsai-pp-edit-row">
-                    <label>输出文件名</label>
+                    <label>Output Filename</label>
                     <input type="text" value="${escapeHtml(outputName)}" data-global="output_filename" style="flex:1;min-width:150px;">
                 </div>
                 <div class="bsai-pp-edit-row">
-                    <label>帧率</label>
+                    <label>Frame Rate</label>
                     <input type="number" min="1" max="120" step="1" value="${frameRate}" data-global="frame_rate" style="width:70px;">
-                    <label>默认过渡</label>
+                    <label>Default Transition</label>
                     <select data-global="default_transition">
                         ${TRANSITIONS.map(t => `<option value="${t}" ${t === defaultTrans ? "selected" : ""}>${TRANSITION_LABELS[t]}</option>`).join("")}
                     </select>
-                    <label>过渡时长</label>
+                    <label>Transition Duration</label>
                     <input type="number" min="0" max="5" step="0.1" value="${transDur}" data-global="transition_duration" style="width:70px;">
                 </div>
                 <div class="bsai-pp-edit-row">
-                    <label>片段总数</label>
-                    <span style="color:#4a90d9;font-size:13px;font-weight:600;">${videoClips.length} 个视频</span>
-                    <label>总时长</label>
+                    <label>Clip Count</label>
+                    <span style="color:#4a90d9;font-size:13px;font-weight:600;">${videoClips.length} videos</span>
+                    <label>Total Duration</label>
                     <span style="color:#4caf50;font-size:13px;font-weight:600;">${formatTime(totalDur)}</span>
                 </div>
                 <div class="bsai-pp-edit-row" style="margin-top:6px;padding-top:6px;border-top:1px dashed #3a3a3a;flex-wrap:wrap;">
-                    <label style="color:#e0b050;font-weight:700;">4K 超分高清修复</label>
-                    <label style="display:flex;align-items:center;gap:4px;"><input type="checkbox" data-global="upscale_enable" ${effectiveUpscaleEnable ? "checked" : ""}> 启用</label>
+                    <label style="color:#e0b050;font-weight:700;">4K Upscale HD Repair</label>
+                    <label style="display:flex;align-items:center;gap:4px;"><input type="checkbox" data-global="upscale_enable" ${effectiveUpscaleEnable ? "checked" : ""}> Enable</label>
                 </div>
                 <div class="bsai-pp-edit-row" style="flex-wrap:wrap;">
-                    <label>放大模型</label>
+                    <label>Upscale Model</label>
                     <select data-global="upscale_model" style="flex:1;min-width:170px;max-width:250px;">${upscaleModelOptions}</select>
-                    <label>倍率</label>
-                    <input type="number" min="1" max="8" step="0.01" value="${upscaleScale}" data-global="upscale_scale" style="width:68px;" title="4 = 4K 级">
+                    <label>Scale</label>
+                    <input type="number" min="1" max="8" step="0.01" value="${upscaleScale}" data-global="upscale_scale" style="width:68px;" title="4 = 4K level">
                 </div>
                 <div class="bsai-pp-edit-row" style="flex-wrap:wrap;">
-                    <label>分块</label>
-                    <input type="number" min="0" max="2048" step="16" value="${upscaleTile}" data-global="upscale_tile_size" style="width:68px;" title="0=整帧快速路径(RTX30xx+推荐)，爆显存时改为正数分块">
-                    <label>批帧</label>
+                    <label>Tile</label>
+                    <input type="number" min="0" max="2048" step="16" value="${upscaleTile}" data-global="upscale_tile_size" style="width:68px;" title="0 = full-frame fast path (RTX 30xx+); use a positive tile size when VRAM runs out">
+                    <label>Batch Frames</label>
                     <input type="number" min="1" max="128" step="1" value="${upscaleBatch}" data-global="upscale_batch" style="width:68px;">
-                    <label>细节</label>
+                    <label>Detail</label>
                     <input type="number" min="0" max="1.5" step="0.05" value="${upscaleDetail}" data-global="upscale_detail" style="width:68px;">
-                    <label>人脸</label>
+                    <label>Face</label>
                     <select data-global="upscale_face" style="width:130px;">${upscaleFaceOptions}</select>
                 </div>
                 <div class="bsai-pp-clip-actions">
-                    <button class="bsai-pp-btn" data-act="scan">🔍 扫描目录</button>
-                    <button class="bsai-pp-btn" data-act="manual-import">📥 导入文件</button>
-                    <button class="bsai-pp-btn" data-act="play" id="bsai-pp-play-btn2">▶️ 播放</button>
-                    <button class="bsai-pp-btn bsai-pp-btn-primary" data-act="render">🎞️ 渲染输出</button>
-                    <button class="bsai-pp-btn bsai-pp-btn-danger" data-act="clear-all">🗑 清空全部</button>
+                    <button class="bsai-pp-btn" data-act="scan">🔍 Scan Directory</button>
+                    <button class="bsai-pp-btn" data-act="manual-import">📥 Import Files</button>
+                    <button class="bsai-pp-btn" data-act="play" id="bsai-pp-play-btn2">▶️ Play</button>
+                    <button class="bsai-pp-btn bsai-pp-btn-primary" data-act="render">🎞️ Render Output</button>
+                    <button class="bsai-pp-btn bsai-pp-btn-danger" data-act="clear-all">🗑 Clear All</button>
                 </div>
-                <div style="color:#666;font-size:11px;margin-top:8px;">💡 点击时间轴中的片段可编辑其参数</div>`;
+                <div style="color:#666;font-size:11px;margin-top:8px;">💡 Click a clip on the timeline to edit its parameters</div>`;
             // Attach global setting handlers
             panel.querySelectorAll("[data-global]").forEach(input => {
                 const field = input.getAttribute("data-global");
@@ -4878,7 +4878,7 @@ class TimelineEditor {
         }
         const clip = this.td.clips[this.selectedIndex];
         if (clip.is_gap) {
-            panel.innerHTML = `<div class="bsai-pp-no-selection">此位置是空位（已删除的片段）<br>点击空位块可选择移除它</div>`;
+            panel.innerHTML = `<div class="bsai-pp-no-selection">This position is empty (deleted clip)<br>Click the empty slot to select and remove it</div>`;
             return;
         }
         const isVideo = clip.track_type === "video";
@@ -4901,23 +4901,23 @@ class TimelineEditor {
 
         let html = `
             <div class="bsai-pp-edit-row">
-                <label>文件名</label>
+                <label>Filename</label>
                 <input type="text" value="${escapeHtml(clip.file_name)}" readonly style="opacity:0.6">
-                <span class="bsai-pp-link-badge ${isLinked ? "linked" : "unlinked"}" data-act="toggle-link" title="点击${isLinked ? "解除" : "建立"}音视频链接">
-                    ${isLinked ? "🔗 已链接" : "🔓 未链接"}
+                <span class="bsai-pp-link-badge ${isLinked ? "linked" : "unlinked"}" data-act="toggle-link" title="Click to ${isLinked ? "unlink" : "link"} audio/video">
+                    ${isLinked ? "🔗 Linked" : "🔓 Unlinked"}
                 </span>
             </div>
             <div class="bsai-pp-edit-row">
-                <label>轨道</label>
+                <label>Track</label>
                 <span style="color:${isVideo ? "#4a90d9" : "#4caf50"};font-size:12px;font-weight:600;">${isVideo ? "📹" : "🎵"} ${trackName}</span>
-                <label>移动到</label>
+                <label>Move To</label>
                 <select data-field="track_index">${trackOptions}</select>
             </div>
             <div class="bsai-pp-edit-row">
-                <label>裁剪起点</label>
+                <label>Trim Start</label>
                 <input type="range" min="0" max="${dur}" step="0.1" value="${trimStart}" data-field="trim_start" data-sync="1">
                 <input type="number" min="0" max="${dur}" step="0.1" value="${trimStart}" data-field="trim_start" data-sync="1">
-                <label>裁剪终点</label>
+                <label>Trim End</label>
                 <input type="range" min="0" max="${dur}" step="0.1" value="${trimEnd}" data-field="trim_end" data-sync="1">
                 <input type="number" min="0" max="${dur}" step="0.1" value="${trimEnd}" data-field="trim_end" data-sync="1">
             </div>`;
@@ -4926,63 +4926,63 @@ class TimelineEditor {
             const posY = clip.pos_y ?? 0;
             html += `
             <div class="bsai-pp-edit-row">
-                <label>入场过渡</label>
+                <label>In Transition</label>
                 <select data-field="transition_in" data-sync="1">
                     ${TRANSITIONS.map(t => `<option value="${t}" ${t === transIn ? "selected" : ""}>${TRANSITION_LABELS[t]}</option>`).join("")}
                 </select>
-                <label>出场过渡</label>
+                <label>Out Transition</label>
                 <select data-field="transition_out" data-sync="1">
                     ${TRANSITIONS.map(t => `<option value="${t}" ${t === transOut ? "selected" : ""}>${TRANSITION_LABELS[t]}</option>`).join("")}
                 </select>
-                <label>过渡时长</label>
+                <label>Transition Duration</label>
                 <input type="number" min="0" max="5" step="0.1" value="${transDur}" data-field="transition_duration" data-sync="1">
             </div>
             <div class="bsai-pp-edit-row">
-                <label>视频启用</label>
+                <label>Video Enabled</label>
                 <input type="checkbox" data-field="video_enabled" ${clip.video_enabled !== false ? "checked" : ""}>
-                <label style="color:#e0b050;font-weight:600;">🎞️ 4K超分</label>
-                <input type="checkbox" data-field="upscale_enable" ${clip.upscale_enable === true ? "checked" : ""} title="开启后渲染时对此片段单独执行AI超分放大">
-                <label style="color:#e0b050;font-size:11px;">模型</label>
-                <select data-field="upscale_model" style="flex:1;min-width:120px;max-width:200px;font-size:11px;" title="此片段单独使用的超分模型，留空=使用全局设置">
-                    <option value="">(使用全局模型)</option>
+                <label style="color:#e0b050;font-weight:600;">🎞️ 4K Upscale</label>
+                <input type="checkbox" data-field="upscale_enable" ${clip.upscale_enable === true ? "checked" : ""} title="When on, AI-upscales this clip individually at render time">
+                <label style="color:#e0b050;font-size:11px;">Model</label>
+                <select data-field="upscale_model" style="flex:1;min-width:120px;max-width:200px;font-size:11px;" title="Upscale model for this clip; empty = use global setting">
+                    <option value="">(Use Global Model)</option>
                     ${(this._getWidget("upscale_model")?.options?.values || ["realesr-general-x4v3.pth","RealESRGAN_x4plus.pth","RealESRGAN_x4plus_anime_6B.pth"]).map(m => `<option value="${escapeHtml(m)}" ${clip.upscale_model === m ? "selected" : ""}>${escapeHtml(m)}</option>`).join("")}
                 </select>
-                <label>画面位置</label>
+                <label>Position</label>
                 <span style="color:#888;font-size:11px;">X</span>
                 <input type="range" class="bsai-pp-pos-slider" min="-100" max="100" step="1" value="${posX}" data-field="pos_x">
                 <input type="number" min="-100" max="100" step="1" value="${posX}" data-field="pos_x" style="width:50px;">
                 <span style="color:#888;font-size:11px;">Y</span>
                 <input type="range" class="bsai-pp-pos-slider" min="-100" max="100" step="1" value="${posY}" data-field="pos_y">
                 <input type="number" min="-100" max="100" step="1" value="${posY}" data-field="pos_y" style="width:50px;">
-                <button class="bsai-pp-btn" data-act="reset-pos" style="padding:3px 8px;font-size:11px;">重置</button>
+                <button class="bsai-pp-btn" data-act="reset-pos" style="padding:3px 8px;font-size:11px;">Reset</button>
             </div>`;
         } else {
             html += `
             <div class="bsai-pp-edit-row">
-                <label>音频启用</label>
+                <label>Audio Enabled</label>
                 <input type="checkbox" data-field="audio_enabled" ${clip.audio_enabled !== false ? "checked" : ""}>
-                <label>音频淡入</label>
+                <label>Audio Fade In</label>
                 <input type="number" min="0" max="10" step="0.1" value="${aFadeIn}" data-field="audio_fade_in">
-                <label>音频淡出</label>
+                <label>Audio Fade Out</label>
                 <input type="number" min="0" max="10" step="0.1" value="${aFadeOut}" data-field="audio_fade_out">
             </div>
             <div class="bsai-pp-edit-row">
-                <label>替换音频</label>
-                <input type="text" value="${escapeHtml(audioRep)}" placeholder="留空使用原音频" data-field="audio_replacement">
-                <button class="bsai-pp-btn" data-act="browse-audio">浏览...</button>
-                <button class="bsai-pp-btn" data-act="clear-audio">清除</button>
+                <label>Replace Audio</label>
+                <input type="text" value="${escapeHtml(audioRep)}" placeholder="Leave empty to use original audio" data-field="audio_replacement">
+                <button class="bsai-pp-btn" data-act="browse-audio">Browse...</button>
+                <button class="bsai-pp-btn" data-act="clear-audio">Clear</button>
             </div>`;
         }
         html += `
             <div class="bsai-pp-clip-actions">
-                <button class="bsai-pp-btn" data-act="move-left">◀ 左移</button>
-                <button class="bsai-pp-btn" data-act="move-right">右移 ▶</button>
-                ${isVideo ? '<button class="bsai-pp-btn" data-act="replace-video">替换视频文件</button>' : ""}
+                <button class="bsai-pp-btn" data-act="move-left">◀ Move Left</button>
+                <button class="bsai-pp-btn" data-act="move-right">Move Right ▶</button>
+                ${isVideo ? '<button class="bsai-pp-btn" data-act="replace-video">Replace Video File</button>' : ""}
                 ${isLinked
-                    ? '<button class="bsai-pp-btn" data-act="toggle-link" style="border-color:#ffa726;color:#ffa726;">🔓 取消关联</button>'
-                    : '<button class="bsai-pp-btn" data-act="toggle-link" style="border-color:#4a90d9;color:#4a90d9;">🔗 建立关联</button>'}
-                ${isLinked ? '<button class="bsai-pp-btn" data-act="sync-linked">🔄 同步链接</button>' : ""}
-                <button class="bsai-pp-btn bsai-pp-btn-danger" data-act="delete">🗑 删除片段</button>
+                    ? '<button class="bsai-pp-btn" data-act="toggle-link" style="border-color:#ffa726;color:#ffa726;">🔓 Unlink</button>'
+                    : '<button class="bsai-pp-btn" data-act="toggle-link" style="border-color:#4a90d9;color:#4a90d9;">🔗 Link</button>'}
+                ${isLinked ? '<button class="bsai-pp-btn" data-act="sync-linked">🔄 Sync Link</button>' : ""}
+                <button class="bsai-pp-btn bsai-pp-btn-danger" data-act="delete">🗑 Delete Clip</button>
             </div>`;
         panel.innerHTML = html;
         this._attachEditEvents(clip);
@@ -5040,16 +5040,16 @@ class TimelineEditor {
                 dialog.className = "bsai-pp-import-dialog";
                 dialog.style.minWidth = "360px";
                 dialog.innerHTML = `
-                    <h3>🗑 删除确认</h3>
+                    <h3>🗑 Confirm Delete</h3>
                     <div style="color:#ccc;font-size:13px;padding:10px 0;">
-                        该片段已链接音视频，删除将同时移除：<br>
+                        This clip is linked to audio/video; deleting will also remove:<br>
                         🎬 ${escapeHtml(c.file_name)}<br>
                         🎵 ${escapeHtml(linkedName)}<br>
-                        <span style="color:#ff9800;">关联的音视频片段将一并删除</span>
+                        <span style="color:#ff9800;">Linked audio/video clips will be deleted together</span>
                     </div>
                     <div style="display:flex;gap:8px;justify-content:flex-end;">
-                        <button class="bsai-pp-btn" data-cancel>取消</button>
-                        <button class="bsai-pp-btn bsai-pp-btn-danger" data-confirm>确认删除</button>
+                        <button class="bsai-pp-btn" data-cancel>Cancel</button>
+                        <button class="bsai-pp-btn bsai-pp-btn-danger" data-confirm>Confirm Delete</button>
                     </div>`;
                 overlay.appendChild(dialog);
                 document.body.appendChild(overlay);
@@ -5091,7 +5091,7 @@ class TimelineEditor {
             const linked = this.td.clips.find(c => c.id === clip.linked_id);
             if (linked) linked.linked_id = null;
             clip.linked_id = null;
-            this._toast("已解除音视频链接", "info");
+            this._toast("Audio/video unlinked", "info");
         } else {
             const partner = this.td.clips.find(c => c.file_path === clip.file_path && c.id !== clip.id && !c.linked_id && c.track_type !== clip.track_type);
             if (partner) {
@@ -5104,9 +5104,9 @@ class TimelineEditor {
                 dst.transition_in = src.transition_in;
                 dst.transition_out = src.transition_out;
                 dst.transition_duration = src.transition_duration;
-                this._toast("已建立音视频链接并同步裁剪参数", "success");
+                this._toast("Audio/video linked and trim params synced", "success");
             } else {
-                this._toast("没有可链接的对应片段", "info");
+                this._toast("No matching clip to link", "info");
                 return;
             }
         }
@@ -5115,7 +5115,7 @@ class TimelineEditor {
     }
 
     _syncLinkedClip(clip) {
-        if (!clip.linked_id) { this._toast("该片段未链接", "info"); return; }
+        if (!clip.linked_id) { this._toast("This clip is not linked", "info"); return; }
         const linked = this.td.clips.find(c => c.id === clip.linked_id);
         if (!linked) return;
         const src = clip.track_type === "video" ? clip : linked;
@@ -5127,7 +5127,7 @@ class TimelineEditor {
         dst.transition_duration = src.transition_duration;
         this._save();
         this._renderAll();
-        this._toast("已同步音视频裁剪参数", "success");
+        this._toast("Audio/video trim params synced", "success");
     }
 
     _autoLinkClips() {
@@ -5198,7 +5198,7 @@ class TimelineEditor {
             this.td.clips = newClips;
         }
         if (linked > 0) {
-            this._toast(`自动配对 ${linked} 组音视频`, "success");
+            this._toast(`Auto-paired ${linked} audio/video pairs`, "success");
         }
         this._alignAudioToVideo();
     }
@@ -5255,7 +5255,7 @@ class TimelineEditor {
         const aClips = clips.filter(c => c.track_type === "audio");
         const vTotal = vClips.filter(c => c.video_enabled !== false).reduce((s, c) => s + (c.trim_end - c.trim_start), 0);
         const aTotal = aClips.filter(c => c.audio_enabled !== false).reduce((s, c) => s + (c.trim_end - c.trim_start), 0);
-        info.textContent = `📹 ${vClips.length}个视频片段 (${formatTime(vTotal)}) | 🎵 ${aClips.length}个音频片段 (${formatTime(aTotal)}) | ${this.td.video_tracks?.length || 1}视频轨道 ${this.td.audio_tracks?.length || 1}音频轨道`;
+        info.textContent = `📹 ${vClips.length} video clips (${formatTime(vTotal)}) | 🎵 ${aClips.length} audio clips (${formatTime(aTotal)}) | ${this.td.video_tracks?.length || 1} video tracks ${this.td.audio_tracks?.length || 1} audio tracks`;
     }
 
     _onClick(e) {
@@ -5264,7 +5264,7 @@ class TimelineEditor {
 
     async _scanNow() {
         const dir = this._getWidgetValue("watch_directory", "output");
-        this._toast("正在扫描目录...", "info");
+        this._toast("Scanning directory...", "info");
         try {
             const resp = await api.fetchApi(`/bsai_premiere_pro/scan?directory=${encodeURIComponent(dir)}`);
             const data = await resp.json();
@@ -5283,18 +5283,18 @@ class TimelineEditor {
                     this._renderAll();
                     const skipped = newFiles.length - added;
                     if (added > 0) {
-                        this._toast(`成功导入 ${added} 个视频` + (skipped > 0 ? ` (跳过 ${skipped} 个无音频)` : ""), "success");
+                        this._toast(`Imported ${added} videos` + (skipped > 0 ? ` (skipped ${skipped} without audio)` : ""), "success");
                     } else if (skipped > 0) {
-                        this._toast(`所有 ${skipped} 个视频均无音频，已跳过`, "info");
+                        this._toast(`All ${skipped} videos have no audio, skipped`, "info");
                     }
                 } else {
-                    this._toast("没有发现新视频文件", "info");
+                    this._toast("No new video files found", "info");
                 }
             } else {
-                this._toast("目录中没有视频文件", "info");
+                this._toast("No video files in the directory", "info");
             }
         } catch (e) {
-            this._toast("扫描失败: " + e.message, "error");
+            this._toast("Scan failed: " + e.message, "error");
         }
     }
 
@@ -5389,7 +5389,7 @@ class TimelineEditor {
             }
             return true;
         } catch (e) {
-            this._toast(`导入失败: ${file.file_name}`, "error");
+            this._toast(`Import failed: ${file.file_name}`, "error");
             return false;
         }
     }
@@ -5407,7 +5407,7 @@ class TimelineEditor {
             const files = Array.from(input.files || []);
             document.body.removeChild(input);
             if (files.length === 0) return;
-            this._toast(`正在上传 ${files.length} 个文件...`, "info");
+            this._toast(`Uploading ${files.length} files...`, "info");
             let imported = 0;
             let lastClipId = null;
             const prevScrollLeft = this.modal.querySelector("[data-track-content]")?.scrollLeft || 0;
@@ -5416,7 +5416,7 @@ class TimelineEditor {
                 const isAudio = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(file.name);
                 const isImage = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(file.name);
                 if (!isVideo && !isAudio && !isImage) {
-                    this._toast(`跳过不支持的文件: ${file.name}`, "error");
+                    this._toast(`Skipped unsupported file: ${file.name}`, "error");
                     continue;
                 }
                 try {
@@ -5428,12 +5428,12 @@ class TimelineEditor {
                     });
                     const result = await resp.json();
                     if (result.error) {
-                        this._toast(`上传 ${file.name} 失败: ${result.error}`, "error");
+                        this._toast(`Upload of ${file.name} failed: ${result.error}`, "error");
                         continue;
                     }
                     const fileInfo = (result.files || [])[0];
                     if (!fileInfo || fileInfo.error) {
-                        this._toast(`上传 ${file.name} 失败: ${fileInfo?.error || "无返回数据"}`, "error");
+                        this._toast(`Upload of ${file.name} failed: ${fileInfo?.error || "no response"}`, "error");
                         continue;
                     }
                     // Track the clip ID for selection
@@ -5444,11 +5444,11 @@ class TimelineEditor {
                     }
                     imported++;
                 } catch (e) {
-                    this._toast(`导入 ${file.name} 失败: ${e.message}`, "error");
+                    this._toast(`Failed to import ${file.name}: ${e.message}`, "error");
                 }
             }
             if (imported > 0) {
-                this._toast(`成功导入 ${imported} 个文件`, "success");
+                this._toast(`Successfully imported ${imported} files`, "success");
                 this._autoLinkClips();
                 this._save();
                 this._renderAll();
@@ -5475,11 +5475,11 @@ class TimelineEditor {
         const dialog = document.createElement("div");
         dialog.className = "bsai-pp-import-dialog";
         dialog.innerHTML = `
-            <h3>选择要导入的视频文件</h3>
+            <h3>Choose Video Files to Import</h3>
             <div class="bsai-pp-import-list">
                 ${files.map(f => {
                     const icon = knownSet.has(f.file_name) ? "✅" : deletedSet.has(f.file_name) ? "❌" : "⬜";
-                    const hint = deletedSet.has(f.file_name) ? ' title="此前已删除，可重新导入"' : "";
+                    const hint = deletedSet.has(f.file_name) ? ' title="Previously deleted, can be re-imported"' : "";
                     return `<div class="bsai-pp-import-item" data-path="${escapeHtml(f.file_path)}" data-name="${escapeHtml(f.file_name)}"${hint}>
                         <span>${icon}</span>
                         <span>${escapeHtml(f.file_name)}</span>
@@ -5488,8 +5488,8 @@ class TimelineEditor {
                 }).join("")}
             </div>
             <div style="display:flex;gap:8px;justify-content:flex-end;">
-                <button class="bsai-pp-btn" data-cancel>取消</button>
-                <button class="bsai-pp-btn bsai-pp-btn-primary" data-import>导入选中</button>
+                <button class="bsai-pp-btn" data-cancel>Cancel</button>
+                <button class="bsai-pp-btn bsai-pp-btn-primary" data-import>Import Selected</button>
             </div>`;
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
@@ -5510,15 +5510,15 @@ class TimelineEditor {
         dialog.querySelector("[data-cancel]").onclick = () => overlay.remove();
         dialog.querySelector("[data-import]").onclick = async () => {
             const toImport = files.filter(f => selected.has(f.file_name));
-            if (toImport.length === 0) { this._toast("请选择至少一个文件", "info"); return; }
+            if (toImport.length === 0) { this._toast("Select at least one file", "info"); return; }
             overlay.remove();
-            this._toast(`正在导入 ${toImport.length} 个视频...`, "info");
+            this._toast(`Importing ${toImport.length} videos...`, "info");
             for (const file of toImport) {
                 await this._addClipFromFile(file);
             }
             this._save();
             this._renderAll();
-            this._toast(`成功导入 ${toImport.length} 个视频`, "success");
+            this._toast(`Successfully imported ${toImport.length} videos`, "success");
         };
     }
 
@@ -5527,7 +5527,7 @@ class TimelineEditor {
         if (!clip) return;
         // Check track locking
         if (this._isTrackLocked(clip)) {
-            this._toast("该轨道已锁定，无法移动片段", "error");
+            this._toast("This track is locked, cannot move clips", "error");
             return;
         }
         const trackClips = this._getClipsForTrack(clip.track_type, clip.track_index);
@@ -5562,7 +5562,7 @@ class TimelineEditor {
         if (!clip) return;
         // Check track locking
         if (this._isTrackLocked(clip)) {
-            this._toast("该轨道已锁定，无法移动片段", "error");
+            this._toast("This track is locked, cannot move clips", "error");
             return;
         }
         const trackType = clip.track_type;
@@ -5671,12 +5671,12 @@ class TimelineEditor {
         menu.className = 'bsai-pp-ctx-menu';
         menu.style.left = e.clientX + 'px';
         menu.style.top = e.clientY + 'px';
-        const trackLabel = trackType === 'video' ? '视频轨道' : '音频轨道';
+        const trackLabel = trackType === 'video' ? 'video track' : 'audio track';
         menu.innerHTML = `
-            <div class="ctx-item" data-act="close-gap-track"><span class="ctx-icon">⇤</span>闭合当前轨道空隙（${trackLabel}）</div>
-            <div class="ctx-item" data-act="close-gap-all"><span class="ctx-icon">⇤</span>闭合所有轨道空隙</div>
+            <div class="ctx-item" data-act="close-gap-track"><span class="ctx-icon">⇤</span>Close Gap on ${trackLabel}</div>
+            <div class="ctx-item" data-act="close-gap-all"><span class="ctx-icon">⇤</span>Close All Track Gaps</div>
             <div class="ctx-sep"></div>
-            <div class="ctx-item danger" data-act="delete-selected"><span class="ctx-icon">🗑</span>删除选中片段</div>
+            <div class="ctx-item danger" data-act="delete-selected"><span class="ctx-icon">🗑</span>Delete Selected Clips</div>
         `;
         document.body.appendChild(menu);
         menu.querySelectorAll('.ctx-item').forEach(item => {
@@ -5687,18 +5687,18 @@ class TimelineEditor {
                 if (act === 'close-gap-track') {
                     const n = this._closeGapsOnTrack(trackType, trackIndex);
                     this._save(); this._renderAll();
-                    this._toast(n > 0 ? `已闭合 ${trackLabel}，移动 ${n} 个片段` : `${trackLabel} 无需闭合`, n > 0 ? 'success' : 'info');
+                    this._toast(n > 0 ? `Closed gap on ${trackLabel}, moved ${n} clips` : `${trackLabel} has no gap`, n > 0 ? 'success' : 'info');
                 } else if (act === 'close-gap-all') {
                     const n = this._closeAllGaps();
                     this._save(); this._renderAll();
-                    this._toast(n > 0 ? `已闭合所有轨道，共移动 ${n} 个片段` : '所有轨道已对齐，无需闭合', n > 0 ? 'success' : 'info');
+                    this._toast(n > 0 ? `Closed gaps on all tracks, moved ${n} clips` : 'All tracks are already aligned', n > 0 ? 'success' : 'info');
                 } else if (act === 'delete-selected') {
                     if (this.boxSelected.size > 0) {
                         this._deleteBoxSelected();
                     } else if (this.selectedIndex >= 0) {
                         this._deleteClip(this.selectedIndex);
                     } else {
-                        this._toast('未选中任何片段', 'info');
+                        this._toast('No clips selected', 'info');
                     }
                 }
             };
@@ -5726,7 +5726,7 @@ class TimelineEditor {
         const clip = this.td.clips[index];
         if (!clip) return;
         if (this._isTrackLocked(clip)) {
-            this._toast("该轨道已锁定，无法删除片段", "error");
+            this._toast("This track is locked, cannot delete clips", "error");
             return;
         }
         if (!this.td.deleted_files) this.td.deleted_files = [];
@@ -5780,7 +5780,7 @@ class TimelineEditor {
         });
         if (!file) return;
         try {
-            this._toast("正在上传文件...", "info");
+            this._toast("Uploading file...", "info");
             const formData = new FormData();
             formData.append("file", file);
             const uploadResp = await fetch("/bsai_premiere_pro/upload", {
@@ -5789,12 +5789,12 @@ class TimelineEditor {
             });
             const uploadData = await uploadResp.json();
             if (uploadData.error || !uploadData.files || uploadData.files.length === 0) {
-                this._toast("上传失败: " + (uploadData.error || "未知错误"), "error");
+                this._toast("Upload failed: " + (uploadData.error || "unknown error"), "error");
                 return;
             }
             const upFile = uploadData.files[0];
             if (upFile.error) {
-                this._toast("上传失败: " + upFile.error, "error");
+                this._toast("Upload failed: " + upFile.error, "error");
                 return;
             }
             const clip = this.td.clips[index];
@@ -5822,9 +5822,9 @@ class TimelineEditor {
             this._save();
             this._renderAll();
             const isAudioLocked = clip.linked_id ? this._isTrackLocked(this.td.clips.find(c => c.id === clip.linked_id) || {}) : false;
-            this._toast(isAudioLocked ? "视频已替换（音频轨道已锁定，音频未替换）" : "视频已替换", "success");
+            this._toast(isAudioLocked ? "Video replaced (audio track is locked, audio not replaced)" : "Video replaced", "success");
         } catch (e) {
-            this._toast("替换失败: " + e.message, "error");
+            this._toast("Replace failed: " + e.message, "error");
         }
     }
 
@@ -5848,7 +5848,7 @@ class TimelineEditor {
         });
         if (!file) return;
         try {
-            this._toast("正在上传音频...", "info");
+            this._toast("Uploading audio...", "info");
             const formData = new FormData();
             formData.append("file", file);
             const uploadResp = await fetch("/bsai_premiere_pro/upload", {
@@ -5857,12 +5857,12 @@ class TimelineEditor {
             });
             const uploadData = await uploadResp.json();
             if (uploadData.error || !uploadData.files || uploadData.files.length === 0) {
-                this._toast("上传失败: " + (uploadData.error || "未知错误"), "error");
+                this._toast("Upload failed: " + (uploadData.error || "unknown error"), "error");
                 return;
             }
             const upFile = uploadData.files[0];
             if (upFile.error) {
-                this._toast("上传失败: " + upFile.error, "error");
+                this._toast("Upload failed: " + upFile.error, "error");
                 return;
             }
             clip.audio_replacement = upFile.file_path;
@@ -5870,20 +5870,20 @@ class TimelineEditor {
             if (inp) inp.value = upFile.file_path;
             this._save();
             this._renderTimeline();
-            this._toast("音频已替换", "success");
+            this._toast("Audio replaced", "success");
         } catch (e) {
-            this._toast("替换失败: " + e.message, "error");
+            this._toast("Replace failed: " + e.message, "error");
         }
     }
 
     async _renderVideo() {
         this._save();
         const clips = this.td.clips || [];
-        if (clips.length === 0) { this._toast("时间轴上没有视频片段", "error"); return; }
+        if (clips.length === 0) { this._toast("No video clips on the timeline", "error"); return; }
         const btn = this.modal.querySelector('[data-act="render"]');
         btn.disabled = true;
-        btn.textContent = "渲染中...";
-        this._showProgress("正在处理视频片段...");
+        btn.textContent = "Rendering...";
+        this._showProgress("Processing video clips...");
         try {
             const body = {
                 timeline_data: JSON.stringify(this.td),
@@ -5902,7 +5902,7 @@ class TimelineEditor {
                 upscale_detail: parseFloat(this._getWidgetValue("upscale_detail", 0.5)),
                 upscale_face: this._getWidgetValue("upscale_face", "Off"),
             };
-            this._updateProgress(30, "合并视频片段...");
+            this._updateProgress(30, "Merging video clips...");
             const resp = await api.fetchApi("/bsai_premiere_pro/render", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -5911,17 +5911,17 @@ class TimelineEditor {
             const result = await resp.json();
             this._hideProgress();
             if (result.error) {
-                this._toast("渲染失败: " + result.error, "error");
+                this._toast("Render failed: " + result.error, "error");
             } else {
-                this._toast("渲染成功! " + result.filename, "success");
+                this._toast("Render succeeded! " + result.filename, "success");
                 this._showPreview(result.filename);
             }
         } catch (e) {
             this._hideProgress();
-            this._toast("渲染失败: " + e.message, "error");
+            this._toast("Render failed: " + e.message, "error");
         } finally {
             btn.disabled = false;
-            btn.textContent = "🎞️ 渲染输出";
+            btn.textContent = "🎞️ Render Output";
         }
     }
 
@@ -5937,7 +5937,7 @@ class TimelineEditor {
             const enlargeBtn = this.modal.querySelector('[data-act="enlarge-preview"]');
             if (enlargeBtn) enlargeBtn.textContent = "🗗";
             const infoEl = this.modal.querySelector("[data-preview-info]");
-            if (infoEl) infoEl.textContent = `🎞️ 渲染结果: ${filename}`;
+            if (infoEl) infoEl.textContent = `🎞️ Render result: ${filename}`;
             this._previewZoom = 1;
             video.style.transform = "";
             // Always fill 100% of parent — the overlay uses percentage
@@ -6161,7 +6161,7 @@ function _registerBsaiPP() {
                 try {
                     const td = JSON.parse(node.properties?.bsai_td || '{"clips":[]}');
                     const clipCount = (td.clips || []).filter(c => c.track_type === "video").length;
-                    const modeLabel = bothConnected ? "⚡自动" : "✋手动";
+                    const modeLabel = bothConnected ? "⚡Auto" : "✋Manual";
                     const dur = td.clips?.length > 0
                         ? formatTime(td.clips.filter(c => c.track_type === "video").reduce((s, c) => s + (c.trim_end - c.trim_start), 0))
                         : "00:00.00";
@@ -6193,16 +6193,16 @@ function _registerBsaiPP() {
             dialog.className = "bsai-pp-import-dialog";
             dialog.style.minWidth = "400px";
             dialog.innerHTML = `
-                <h3>🔌 检测到 Image + Audio 已连接</h3>
+                <h3>🔌 Image + Audio Connected</h3>
                 <div style="color:#ccc;font-size:13px;padding:10px 0;line-height:1.6;">
-                    节点已切换为<b style="color:#4a90d9;">自动合并模式</b>。<br>
-                    时间轴上已有 <b style="color:#ffa726;">${vCount}</b> 个视频片段和 <b style="color:#4caf50;">${aCount}</b> 个音频片段。<br>
-                    <span style="color:#ff9800;">是否删除时间轴上的现有文件？</span><br>
-                    <span style="color:#888;font-size:12px;">删除后将从头开始按时间顺序自动合并新文件。</span>
+                    The node switched to <b style="color:#4a90d9;">Auto-Merge Mode</b>.<br>
+                    The timeline has <b style="color:#ffa726;">${vCount}</b> video clips and <b style="color:#4caf50;">${aCount}</b> audio clips.<br>
+                    <span style="color:#ff9800;">Delete the existing files on the timeline?</span><br>
+                    <span style="color:#888;font-size:12px;">After deletion, new files will be auto-merged in time order from the start.</span>
                 </div>
                 <div style="display:flex;gap:8px;justify-content:flex-end;">
-                    <button class="bsai-pp-btn" data-keep>保留现有文件</button>
-                    <button class="bsai-pp-btn bsai-pp-btn-danger" data-clear>删除现有文件</button>
+                    <button class="bsai-pp-btn" data-keep>Keep Existing Files</button>
+                    <button class="bsai-pp-btn bsai-pp-btn-danger" data-clear>Delete Existing Files</button>
                 </div>`;
             overlay.appendChild(dialog);
             document.body.appendChild(overlay);
@@ -6253,7 +6253,7 @@ function _registerBsaiPP() {
                 ctx.font = "13px sans-serif";
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
-                const label = btn.action === "browse" ? "📂 浏览监视目录" : "🎬 打开时间轴编辑器";
+                const label = btn.action === "browse" ? "📂 Browse Watch Directory" : "🎬 Open Timeline Editor";
                 ctx.fillText(label, btn.x + btn.w / 2, btn.y + btn.h / 2);
             }
         };
@@ -6523,13 +6523,13 @@ function _registerBsaiPP() {
         nodeType.prototype.getExtraMenuOptions = function (canvas, options) {
             oldGetMenu?.apply(this, arguments);
             options.push({
-                content: "📂 浏览监视目录",
+                content: "📂 Browse Watch Directory",
                 callback: () => {
                     this._bsaiBrowseDir?.();
                 },
             });
             options.push({
-                content: "🎬 打开时间轴编辑器",
+                content: "🎬 Open Timeline Editor",
                 callback: () => {
                     this._bsaiOpenEditor?.();
                 },

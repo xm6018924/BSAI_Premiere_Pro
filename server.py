@@ -14,6 +14,37 @@ from .utils import (
     _resolve_directory,
 )
 
+def _confine_comfy_path(path):
+    """Return realpath of path if it lies inside a ComfyUI base dir, else None.
+
+    Security: /stream and /open_explorer previously accepted arbitrary absolute
+    paths from a caller-supplied query param. All file access is now restricted
+    to the ComfyUI input/temp/output directories (realpath + commonpath).
+    """
+    try:
+        import folder_paths
+        bases = []
+        for base in (folder_paths.get_input_directory(),
+                     folder_paths.get_temp_directory(),
+                     folder_paths.get_output_directory()):
+            try:
+                bases.append(os.path.realpath(base))
+            except Exception:
+                pass
+        real = os.path.realpath(str(path or "").strip())
+        if not real:
+            return None
+        for base in bases:
+            try:
+                if os.path.commonpath([base, real]) == base:
+                    return real
+            except Exception:
+                continue
+        return None
+    except Exception:
+        return None
+
+
 # In-memory timeline data store, keyed by node unique_id.
 # Frontend POSTs timeline JSON here; backend render() reads from here.
 _timeline_store = {}
@@ -112,6 +143,7 @@ async def stream_video(request):
     """Stream a video/audio/image file for timeline playback with Range support."""
     file_path = request.query.get("file", "")
     file_path = urllib.parse.unquote(file_path)
+    file_path = _confine_comfy_path(file_path)
     if not file_path or not os.path.exists(file_path):
         return web.Response(status=404, text="File not found")
 
@@ -616,30 +648,29 @@ async def upload_file(request):
 
 @PromptServer.instance.routes.get("/bsai_premiere_pro/open_explorer")
 async def open_explorer(request):
-    """Open Windows Explorer at the specified directory path."""
+    """Open Windows Explorer at a ComfyUI input/output/temp directory."""
     raw_path = request.query.get("path", "")
     dir_path = urllib.parse.unquote(raw_path)
     if not dir_path:
         return web.json_response({"error": "No path provided"}, status=400)
     try:
-        # Resolve relative paths (e.g. "output" → ComfyUI/output)
-        if not os.path.isabs(dir_path):
-            try:
-                import folder_paths
-                base = folder_paths.base_path
-            except Exception:
-                base = os.getcwd()
-            candidate = os.path.join(base, dir_path)
-            if os.path.exists(candidate):
-                dir_path = candidate
-        if not os.path.exists(dir_path):
-            return web.json_response({"error": f"Path not found: {dir_path}"}, status=404)
+        # Confine to ComfyUI base dirs (realpath + commonpath). Relative names
+        # like "output" resolve against the ComfyUI base dir, then must stay
+        # inside input/temp/output; absolute paths outside are rejected.
+        confined = _confine_comfy_path(dir_path)
+        if not confined:
+            return web.json_response(
+                {"error": "Path must be inside ComfyUI input/temp/output directories"},
+                status=400,
+            )
+        if not os.path.isdir(confined):
+            return web.json_response({"error": f"Not a directory: {confined}"}, status=404)
         if os.name == "nt":
             import subprocess
-            subprocess.Popen(["explorer", dir_path])
+            subprocess.Popen(["explorer", confined])
         else:
             import subprocess
-            subprocess.Popen(["xdg-open", dir_path])
-        return web.json_response({"success": True, "path": dir_path})
+            subprocess.Popen(["xdg-open", confined])
+        return web.json_response({"success": True, "path": confined})
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)

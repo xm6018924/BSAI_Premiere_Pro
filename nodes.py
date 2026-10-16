@@ -55,31 +55,31 @@ class BSAIPremiereProTimeline:
                 }),
                 "upscale_enable": ("BOOLEAN", {
                     "default": False,
-                    "tooltip": "4K 超分高清修复：开启后，合并输出前先对视频轨文件执行超分放大，最后再与音频轨合并",
+                    "tooltip": "4K upscale HD repair: when enabled, upscales the video track before final merge with the audio track",
                 }),
                 "upscale_model": (get_upscale_model_list(), {
                     "default": "realesr-general-x4v3.pth",
-                    "tooltip": "超分放大模型：由 BSAI-H3-upscale-4K 插件提供（引擎/生成式/Real-ESRGAN 模型），缺失会自动静默下载",
+                    "tooltip": "Upscale model: provided by the BSAI-H3-upscale-4K plugin (engine/generative/Real-ESRGAN); missing models are auto-downloaded silently",
                 }),
                 "upscale_scale": ("FLOAT", {
                     "default": 4.0, "min": 1.0, "max": 8.0, "step": 0.01,
-                    "tooltip": "放大倍数：4 = 4K 级",
+                    "tooltip": "Upscale factor: 4 = 4K level",
                 }),
                 "upscale_tile_size": ("INT", {
                     "default": 0, "min": 0, "max": 2048, "step": 16,
-                    "tooltip": "分块大小：0 = 整帧快速路径（RTX 30xx+ 推荐）；爆显存时改为正数分块",
+                    "tooltip": "Tile size: 0 = full-frame fast path (recommended on RTX 30xx+); use a positive tile size when VRAM runs out",
                 }),
                 "upscale_batch": ("INT", {
                     "default": 4, "min": 1, "max": 128, "step": 1,
-                    "tooltip": "超分批帧数：控制显存占用与速度",
+                    "tooltip": "Upscale batch frame count: controls VRAM usage and speed",
                 }),
                 "upscale_detail": ("FLOAT", {
                     "default": 0.5, "min": 0.0, "max": 1.5, "step": 0.05,
-                    "tooltip": "细节增强强度（高清修复）：0 = 关闭",
+                    "tooltip": "Detail enhancement strength (HD repair): 0 = off",
                 }),
-                "upscale_face": (["Off", "GFPGANv1.4", "CodeFormer", "小脸增强(CodeFormer)"], {
+                "upscale_face": (["Off", "GFPGANv1.4", "CodeFormer", "SmallFace Enhance (CodeFormer)"], {
                     "default": "Off",
-                    "tooltip": "人脸修复：H3 远景小脸模糊时开启",
+                    "tooltip": "Face repair: enable when H3 far-shot small faces look blurry",
                 }),
             },
             "optional": {
