@@ -899,12 +899,12 @@ def upscale_video_file(video_path, params, target_fps, temp_dir):
     import torch
     mod = load_h3_upscale_module()
     if mod is None:
-        raise RuntimeError("未找到 BSAI-H3-upscale-4K 插件，无法执行 4K 超分，请先安装该插件")
+        raise RuntimeError("BSAI-H3-upscale-4K plugin not found; install it to enable 4K upscale")
     if not params or not params.get("enable"):
         raise RuntimeError("upscale disabled")
     info = get_video_info(video_path)
     if not info or info["width"] <= 0 or info["height"] <= 0:
-        raise RuntimeError(f"无法读取视频信息: {video_path}")
+        raise RuntimeError(f"Failed to read video info: {video_path}")
     w, h = int(info["width"]), int(info["height"])
     fps = float(info["fps"] or target_fps or 24.0)
     ffmpeg = get_ffmpeg()
@@ -930,11 +930,11 @@ def upscale_video_file(video_path, params, target_fps, temp_dir):
            "-an", "-f", "rawvideo", "-pix_fmt", "rgb24", raw_path]
     r = subprocess.run(dec, capture_output=True, encoding="utf-8", errors="replace", timeout=3600)
     if r.returncode != 0:
-        raise RuntimeError(f"解码视频失败: {r.stderr[-1500:]}")
+        raise RuntimeError(f"Failed to decode video: {r.stderr[-1500:]}")
     raw_bytes = os.path.getsize(raw_path)
     n_frames = raw_bytes // (w * h * 3)
     if n_frames <= 0:
-        raise RuntimeError("解码视频帧数为 0")
+        raise RuntimeError("Decoded video has 0 frames")
 
     mm = np.memmap(raw_path, dtype=np.uint8, mode="r").reshape(n_frames, h, w, 3)
 
@@ -1025,7 +1025,7 @@ def upscale_video_file(video_path, params, target_fps, temp_dir):
     if p.returncode != 0:
         err = p.stderr.read().decode("utf-8", "replace")
     if p.returncode != 0:
-        raise RuntimeError(f"超分后编码失败: {err[-1500:]}")
+        raise RuntimeError(f"Failed to encode after upscale: {err[-1500:]}")
     print(f"[BSAI Premiere Pro] 4K超分完成: {out_path} ({ow}x{oh})")
     # 拷一份到 ComfyUI output 目录，避免临时目录被清理后丢失
     try:
@@ -1256,7 +1256,7 @@ def _upscale_legacy_output(legacy_video, upscale_params, target_fps, temp_dir, f
         has_audio = False
     up_video = upscale_video_file(legacy_video, upscale_params, target_fps, temp_dir)
     if not os.path.exists(up_video):
-        return None, "4K超分后未生成视频文件"
+        return None, "No video file produced after 4K upscale"
     if has_audio:
         final_out = os.path.join(temp_dir, "legacy_final.mp4")
         merge = [
@@ -1269,7 +1269,7 @@ def _upscale_legacy_output(legacy_video, upscale_params, target_fps, temp_dir, f
         ]
         r = subprocess.run(merge, capture_output=True, encoding="utf-8", errors="replace", timeout=600)
         if r.returncode != 0:
-            return None, f"超分后合音频失败: {r.stderr[-1500:]}"
+            return None, f"Failed to mux audio after upscale: {r.stderr[-1500:]}"
         shutil.copy2(final_out, output_path)
         print(f"[BSAI Premiere Pro] 旧版超分+合音频完成 -> {output_path}")
     else:
@@ -1368,7 +1368,7 @@ def _process_multitrack(timeline_data, enabled_clips, temp_dir, output_path,
         try:
             final_video = upscale_video_file(final_video, upscale_params, target_fps, temp_dir)
         except Exception as e:
-            return None, f"4K超分失败: {e}"
+            return None, f"4K upscale failed: {e}"
 
     # --- Combine final video and audio into output ---
     if final_video and final_audio:
@@ -1479,14 +1479,15 @@ def save_image_tensor(tensor, output_path):
             if arr.shape[2] == 1:
                 arr = arr[:, :, 0]
         else:
-            print(f"[BSAI Premiere Pro] image 张量形状 {arr.shape} 不是有效图像帧（期望 H,W,C；C∈{{1,3,4}}）。"
-                  "检查 IMAGE 输入是否接到了视频帧输出（如 H3 Extender 的 images）；"
-                  "若要把生成片段加入时间线请接 clip_videos 端口（H3 Extender 的 clip_videos 输出）。")
+            print(f"[BSAI Premiere Pro] Image tensor shape {arr.shape} is not a valid image frame "
+                  "(expected H,W,C with C in {1,3,4}). Check that the IMAGE input is connected to a "
+                  "video frame output (e.g. H3 Extender's images); to add a generated clip to the "
+                  "timeline, connect the clip_videos port (H3 Extender's clip_videos output).")
             return False
     elif arr.ndim == 2:
         pass
     else:
-        print(f"[BSAI Premiere Pro] image 张量形状 {arr.shape} 无法保存为图像。")
+        print(f"[BSAI Premiere Pro] Image tensor shape {arr.shape} cannot be saved as an image.")
         return False
     try:
         arr = (arr * 255).clip(0, 255).astype(np.uint8)

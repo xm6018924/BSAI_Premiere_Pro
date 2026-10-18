@@ -54,7 +54,14 @@ _timeline_store = {}
 async def scan_directory(request):
     directory = request.query.get("directory", "output")
     try:
-        files = scan_video_directory(directory)
+        resolved = _resolve_directory(directory) if directory else _resolve_directory("output")
+        confined = _confine_comfy_path(resolved)
+        if not confined:
+            return web.json_response(
+                {"files": [], "error": "Path must be inside ComfyUI input/temp/output directories"},
+                status=400,
+            )
+        files = scan_video_directory(confined)
         return web.json_response({"files": files, "directory": directory})
     except Exception as e:
         return web.json_response({"files": [], "error": str(e)}, status=500)
@@ -64,6 +71,7 @@ async def scan_directory(request):
 async def get_metadata(request):
     file_path = request.query.get("file", "")
     file_path = urllib.parse.unquote(file_path)
+    file_path = _confine_comfy_path(file_path)
     if not file_path or not os.path.exists(file_path):
         return web.json_response({"error": "File not found"}, status=404)
     info = get_video_info(file_path)
@@ -76,6 +84,7 @@ async def get_metadata(request):
 async def get_thumbnail(request):
     file_path = request.query.get("file", "")
     file_path = urllib.parse.unquote(file_path)
+    file_path = _confine_comfy_path(file_path)
     if not file_path or not os.path.exists(file_path):
         return web.json_response({"error": "File not found"}, status=404)
     thumb = generate_thumbnail(file_path)
@@ -89,6 +98,7 @@ async def get_filmstrip(request):
     import asyncio
     file_path = request.query.get("file", "")
     file_path = urllib.parse.unquote(file_path)
+    file_path = _confine_comfy_path(file_path)
     if not file_path or not os.path.exists(file_path):
         return web.json_response({"error": "File not found"}, status=404)
     count = int(request.query.get("count", "10"))
@@ -108,6 +118,7 @@ async def get_waveform(request):
     import asyncio
     file_path = request.query.get("file", "")
     file_path = urllib.parse.unquote(file_path)
+    file_path = _confine_comfy_path(file_path)
     if not file_path or not os.path.exists(file_path):
         return web.json_response({"error": "File not found"}, status=404)
     try:
@@ -123,7 +134,14 @@ async def get_waveform(request):
 async def list_audio_files(request):
     directory = request.query.get("directory", "output")
     try:
-        files = scan_audio_files(directory)
+        resolved = _resolve_directory(directory) if directory else _resolve_directory("output")
+        confined = _confine_comfy_path(resolved)
+        if not confined:
+            return web.json_response(
+                {"files": [], "error": "Path must be inside ComfyUI input/temp/output directories"},
+                status=400,
+            )
+        files = scan_audio_files(confined)
         return web.json_response({"files": files})
     except Exception as e:
         return web.json_response({"files": [], "error": str(e)}, status=500)
@@ -290,24 +308,17 @@ async def browse_directories(request):
 
     def _scan_dir(p):
         if not p or p == "":
-            if os.name == "nt":
-                import ctypes
-                buf = ctypes.create_unicode_buffer(1024)
-                buf_len = ctypes.windll.kernel32.GetLogicalDriveStringsW(
-                    ctypes.sizeof(buf) // 2, buf
-                )
-                drives = []
-                for i in range(0, buf_len, 4):
-                    d = buf[i:i+3]
-                    if d and len(d) == 3 and d[1] == ":":
-                        drives.append(d)
-                return {"path": "", "parent": "", "dirs": drives, "is_root": True, "count": len(drives)}, None
-            else:
-                p = "/"
+            # Empty path defaults to ComfyUI output dir (confined below);
+            # no longer enumerates all drives for security.
+            try:
+                import folder_paths
+                p = folder_paths.get_output_directory()
+            except Exception:
+                p = os.getcwd()
         if not os.path.exists(p):
-            return None, f"路径不存在: {p}"
+            return None, f"Path does not exist: {p}"
         if not os.path.isdir(p):
-            return None, f"不是目录: {p}"
+            return None, f"Not a directory: {p}"
         parent = os.path.dirname(p.rstrip(os.sep)) or p
         if parent == p:
             parent = ""
@@ -342,18 +353,24 @@ async def browse_directories(request):
         dirs.sort()
         return {"path": p, "parent": parent, "dirs": dirs, "is_root": False, "count": len(dirs), "errors": errors}, None
 
-    resolved = _resolve_directory(path) if path else ""
+    resolved = _resolve_directory(path) if path else _resolve_directory("output")
+    confined = _confine_comfy_path(resolved)
+    if not confined:
+        return web.json_response(
+            {"error": "Path must be inside ComfyUI input/temp/output directories", "path": path},
+            status=400,
+        )
 
     try:
         result, error = await asyncio.wait_for(
-            asyncio.to_thread(_scan_dir, resolved),
+            asyncio.to_thread(_scan_dir, confined),
             timeout=30.0
         )
         if error:
             return web.json_response({"error": error, "path": path}, status=400)
         return web.json_response(result)
     except asyncio.TimeoutError:
-        return web.json_response({"error": f"目录扫描超时(30s): {path}", "path": path}, status=504)
+        return web.json_response({"error": f"Directory scan timed out (30s): {path}", "path": path}, status=504)
     except Exception as e:
         return web.json_response({"error": str(e), "path": path}, status=500)
 
@@ -372,25 +389,17 @@ async def browse_files(request):
 
     def _scan_files(p):
         if not p or p == "":
-            # Empty path: show drives (Windows) or root (Unix), same as directory browser
-            if os.name == "nt":
-                import ctypes
-                buf = ctypes.create_unicode_buffer(1024)
-                buf_len = ctypes.windll.kernel32.GetLogicalDriveStringsW(
-                    ctypes.sizeof(buf) // 2, buf
-                )
-                drives = []
-                for i in range(0, buf_len, 4):
-                    d = buf[i:i+3]
-                    if d and len(d) == 3 and d[1] == ":":
-                        drives.append(d)
-                return {"path": "", "parent": "", "dirs": drives, "files": [], "is_root": True, "count": len(drives)}, None
-            else:
-                p = "/"
+            # Empty path defaults to ComfyUI output dir (confined below);
+            # no longer enumerates all drives for security.
+            try:
+                import folder_paths
+                p = folder_paths.get_output_directory()
+            except Exception:
+                p = os.getcwd()
         if not os.path.exists(p):
-            return None, f"路径不存在: {p}"
+            return None, f"Path does not exist: {p}"
         if not os.path.isdir(p):
-            return None, f"不是目录: {p}"
+            return None, f"Not a directory: {p}"
         parent = os.path.dirname(p.rstrip(os.sep)) or p
         if parent == p:
             parent = ""
@@ -433,18 +442,24 @@ async def browse_files(request):
         files.sort(key=lambda f: f["name"])
         return {"path": p, "parent": parent, "dirs": dirs, "files": files}, None
 
-    resolved = _resolve_directory(path) if path else ""
+    resolved = _resolve_directory(path) if path else _resolve_directory("output")
+    confined = _confine_comfy_path(resolved)
+    if not confined:
+        return web.json_response(
+            {"error": "Path must be inside ComfyUI input/temp/output directories", "path": path},
+            status=400,
+        )
 
     try:
         result, error = await asyncio.wait_for(
-            asyncio.to_thread(_scan_files, resolved),
+            asyncio.to_thread(_scan_files, confined),
             timeout=30.0
         )
         if error:
             return web.json_response({"error": error, "path": path}, status=400)
         return web.json_response(result)
     except asyncio.TimeoutError:
-        return web.json_response({"error": f"文件扫描超时(30s): {path}", "path": path}, status=504)
+        return web.json_response({"error": f"File scan timed out (30s): {path}", "path": path}, status=504)
     except Exception as e:
         return web.json_response({"error": str(e), "path": path}, status=500)
 
