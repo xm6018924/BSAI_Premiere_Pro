@@ -230,6 +230,22 @@ async def render_video(request):
         if not clips:
             return web.json_response({"error": "No clips to merge"})
 
+        # Confine each clip's file_path and audio_replacement to ComfyUI base dirs
+        # before passing to ffmpeg (prevents arbitrary file read via crafted workflows)
+        for clip in clips:
+            if not isinstance(clip, dict):
+                continue
+            for path_field in ("file_path", "audio_replacement"):
+                p = clip.get(path_field)
+                if p and isinstance(p, str):
+                    confined = _confine_comfy_path(p)
+                    if not confined:
+                        return web.json_response(
+                            {"error": f"Clip path outside ComfyUI directories: {p}"},
+                            status=400,
+                        )
+                    clip[path_field] = confined
+
         # 4K upscale: honour the global switch passed from the timeline editor,
         # plus any clip-level upscale_enable inside timeline_data. Without this
         # the render endpoint would emit the source clips untouched.
@@ -495,8 +511,12 @@ async def add_clip(request):
         node_id = str(body.get("node_id", ""))
         file_path = str(body.get("file_path", ""))
         clip_name = str(body.get("clip_name", ""))
-        if not node_id or not file_path or not _os.path.exists(file_path):
-            return web.json_response({"error": "missing node_id or file_path not found"}, status=400)
+        if not node_id or not file_path:
+            return web.json_response({"error": "missing node_id or file_path"}, status=400)
+        # Confine file_path to ComfyUI base dirs before passing to ffprobe/ffmpeg
+        file_path = _confine_comfy_path(file_path)
+        if not file_path or not _os.path.exists(file_path):
+            return web.json_response({"error": "file_path not found or outside ComfyUI directories"}, status=400)
 
         td_raw = _timeline_store.get(node_id, '{"clips":[],"known_files":[],"deleted_files":[],"directory_history":{}}')
         td = _json.loads(td_raw)
