@@ -77,7 +77,8 @@ class BSAIPremiereProTimeline:
                     "default": 0.5, "min": 0.0, "max": 1.5, "step": 0.05,
                     "tooltip": "Detail enhancement strength (HD repair): 0 = off",
                 }),
-                "upscale_face": (["Off", "GFPGANv1.4", "CodeFormer", "SmallFace Enhance (CodeFormer)"], {
+                # 末项 "小脸增强(CodeFormer)" 为旧版标签：兼容老工作流 JSON 保存值
+                "upscale_face": (["Off", "GFPGANv1.4", "CodeFormer", "SmallFace Enhance (CodeFormer)", "小脸增强(CodeFormer)"], {
                     "default": "Off",
                     "tooltip": "Face repair: enable when H3 far-shot small faces look blurry",
                 }),
@@ -105,6 +106,9 @@ class BSAIPremiereProTimeline:
                upscale_scale=4.0, upscale_tile_size=0, upscale_batch=4,
                upscale_detail=0.5, upscale_face="Off",
                image=None, audio=None, clip_videos=None, unique_id=None):
+        # 旧版中文标签归一化到英文标签（语义/参数完全一致）
+        if upscale_face == "小脸增强(CodeFormer)":
+            upscale_face = "SmallFace Enhance (CodeFormer)"
 
         from .server import _timeline_store
         timeline_data = _timeline_store.get(unique_id, '{"clips":[],"known_files":[],"deleted_files":[],"directory_history":{}}')

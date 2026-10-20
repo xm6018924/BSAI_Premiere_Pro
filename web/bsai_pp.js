@@ -4793,7 +4793,8 @@ class TimelineEditor {
             const _umW = this._getWidget("upscale_model");
             const _umOpts = (_umW?.options?.values && _umW.options.values.length) ? _umW.options.values : [upscaleModel];
             const upscaleModelOptions = _umOpts.map(m => `<option value="${escapeHtml(m)}" ${m === upscaleModel ? "selected" : ""}>${escapeHtml(m)}</option>`).join("");
-            const _faceOpts = ["Off", "GFPGANv1.4", "CodeFormer", "SmallFace Enhance (CodeFormer)"];
+            // 末项为旧版中文标签：兼容老工作流 JSON 保存值（后端入口会归一化到英文标签）
+            const _faceOpts = ["Off", "GFPGANv1.4", "CodeFormer", "SmallFace Enhance (CodeFormer)", "小脸增强(CodeFormer)"];
             const upscaleFaceOptions = _faceOpts.map(f => `<option value="${escapeHtml(f)}" ${f === upscaleFace ? "selected" : ""}>${escapeHtml(f)}</option>`).join("");
             panel.innerHTML = `
                 <div class="bsai-pp-edit-row">

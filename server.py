@@ -257,6 +257,9 @@ async def render_video(request):
             upscale_batch = int(data.get("upscale_batch", 4) or 4)
             upscale_detail = float(data.get("upscale_detail", 0.5))
             upscale_face = data.get("upscale_face", "Off")
+            # 旧版中文标签归一化到英文标签（语义/参数完全一致）
+            if upscale_face == "小脸增强(CodeFormer)":
+                upscale_face = "SmallFace Enhance (CodeFormer)"
         except (TypeError, ValueError):
             upscale_enable, upscale_model = False, "realesr-general-x4v3.pth"
             upscale_scale, upscale_tile_size = 4.0, 0
