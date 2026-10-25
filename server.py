@@ -11,38 +11,8 @@ from .utils import (
     get_video_info, generate_thumbnail, generate_waveform,
     generate_filmstrip,
     process_and_merge, format_time,
-    _resolve_directory,
+    _resolve_directory, _confine_comfy_path,
 )
-
-def _confine_comfy_path(path):
-    """Return realpath of path if it lies inside a ComfyUI base dir, else None.
-
-    Security: /stream and /open_explorer previously accepted arbitrary absolute
-    paths from a caller-supplied query param. All file access is now restricted
-    to the ComfyUI input/temp/output directories (realpath + commonpath).
-    """
-    try:
-        import folder_paths
-        bases = []
-        for base in (folder_paths.get_input_directory(),
-                     folder_paths.get_temp_directory(),
-                     folder_paths.get_output_directory()):
-            try:
-                bases.append(os.path.realpath(base))
-            except Exception:
-                pass
-        real = os.path.realpath(str(path or "").strip())
-        if not real:
-            return None
-        for base in bases:
-            try:
-                if os.path.commonpath([base, real]) == base:
-                    return real
-            except Exception:
-                continue
-        return None
-    except Exception:
-        return None
 
 
 # In-memory timeline data store, keyed by node unique_id.

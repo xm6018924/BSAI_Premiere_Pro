@@ -13,6 +13,41 @@ AUDIO_EXTENSIONS = {".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".wma", ".o
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".svg"}
 MEDIA_EXTENSIONS = VIDEO_EXTENSIONS | AUDIO_EXTENSIONS | IMAGE_EXTENSIONS
 
+# Only the node's advertised container/codec pairs may reach the output filename.
+VIDEO_FORMATS = {
+    "video/h264-mp4": ("h264", "mp4"),
+    "video/h265-mp4": ("h265", "mp4"),
+    "video/h264-mkv": ("h264", "mkv"),
+    "video/h265-mkv": ("h265", "mkv"),
+    "video/h264-mov": ("h264", "mov"),
+    "video/vp9-webm": ("vp9", "webm"),
+}
+
+
+def _confine_comfy_path(path):
+    """Return realpath of path if it lies inside a ComfyUI base dir, else None.
+
+    Caller-supplied paths (HTTP routes and node inputs alike) may only touch
+    the ComfyUI input/temp/output directories.
+    """
+    import folder_paths
+    bases = []
+    for base in (folder_paths.get_input_directory(),
+                 folder_paths.get_temp_directory(),
+                 folder_paths.get_output_directory()):
+        bases.append(os.path.realpath(base))
+    real = os.path.realpath(str(path or "").strip())
+    if not real:
+        return None
+    for base in bases:
+        try:
+            if os.path.commonpath([base, real]) == base:
+                return real
+        except ValueError:
+            # Different drives on Windows -> not under base.
+            continue
+    return None
+
 
 def find_ffmpeg():
     try:
@@ -1050,10 +1085,10 @@ def process_and_merge(timeline_data, output_filename, format_str, pix_fmt,
     clips = timeline_data.get("clips", [])
 
     codec_map = {"h264": "libx264", "h265": "libx265", "vp9": "libvpx-vp9"}
-    parts = format_str.split("/")
-    codec_key = parts[1].split("-")[0] if len(parts) > 1 else "h264"
-    container = parts[1].split("-", 1)[1] if len(parts) > 1 and "-" in parts[1] else "mp4"
-    video_codec = codec_map.get(codec_key, "libx264")
+    if format_str not in VIDEO_FORMATS:
+        return None, f"unsupported format: {format_str}"
+    codec_key, container = VIDEO_FORMATS[format_str]
+    video_codec = codec_map[codec_key]
     output_format = container
 
     crf = str(int(crf)) if crf else "19"

@@ -5,7 +5,7 @@ import traceback
 
 from .utils import (
     process_and_merge, get_video_info, scan_video_directory, format_time,
-    merge_image_audio_to_video, get_upscale_model_list,
+    merge_image_audio_to_video, get_upscale_model_list, _confine_comfy_path,
 )
 
 
@@ -207,8 +207,10 @@ class BSAIPremiereProTimeline:
                 clips_list = json.loads(clip_videos)
                 if isinstance(clips_list, list):
                     for cv in clips_list:
-                        file_path = cv.get("file_path", "")
-                        file_name = cv.get("file_name", os.path.basename(file_path))
+                        # Node inputs arrive through /prompt, so confine clip paths
+                        # exactly like the HTTP routes do before reading them.
+                        file_path = _confine_comfy_path(cv.get("file_path", ""))
+                        file_name = cv.get("file_name", os.path.basename(cv.get("file_path", "")))
                         if not file_path or not os.path.exists(file_path):
                             print(f"[BSAI Premiere Pro] clip_videos: file not found: {file_path}")
                             continue
