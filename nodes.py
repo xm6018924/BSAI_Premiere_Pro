@@ -77,8 +77,7 @@ class BSAIPremiereProTimeline:
                     "default": 0.5, "min": 0.0, "max": 1.5, "step": 0.05,
                     "tooltip": "Detail enhancement strength (HD repair): 0 = off",
                 }),
-                # 末项 "小脸增强(CodeFormer)" 为旧版标签：兼容老工作流 JSON 保存值
-                "upscale_face": (["Off", "GFPGANv1.4", "CodeFormer", "SmallFace Enhance (CodeFormer)", "小脸增强(CodeFormer)"], {
+                "upscale_face": (["Off", "GFPGANv1.4", "CodeFormer", "SmallFace Enhance (CodeFormer)"], {
                     "default": "Off",
                     "tooltip": "Face repair: enable when H3 far-shot small faces look blurry",
                 }),
@@ -291,6 +290,29 @@ class BSAIPremiereProTimeline:
 
         # ── Merge all timeline clips (including any newly added image+audio) ──
         clips = data.get("clips", [])
+
+        # Confine clip file paths stored via /timeline_save before they reach ffmpeg.
+        # Clips whose source path lies outside ComfyUI input/temp/output dirs are
+        # dropped so no arbitrary host file can be copied into output/.
+        _safe_clips = []
+        for c in clips:
+            confined_fp = _confine_comfy_path(c.get("file_path", ""))
+            if not confined_fp:
+                print(f"[BSAI Premiere Pro] Skipping clip '{c.get('file_name','?')}': file path outside ComfyUI directories: {c.get('file_path','')}")
+                continue
+            c["file_path"] = confined_fp
+            ar = c.get("audio_replacement")
+            if ar:
+                confined_ar = _confine_comfy_path(ar)
+                if not confined_ar:
+                    print(f"[BSAI Premiere Pro] Dropping audio_replacement for clip '{c.get('file_name','?')}': path outside ComfyUI directories")
+                    c["audio_replacement"] = None
+                else:
+                    c["audio_replacement"] = confined_ar
+            _safe_clips.append(c)
+        data["clips"] = _safe_clips
+        clips = _safe_clips
+
         if not clips:
             ui = {"error": ["No clips on timeline"]}
             if timeline_updated:
