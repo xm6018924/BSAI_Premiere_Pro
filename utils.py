@@ -527,6 +527,11 @@ def _build_clip_command(clip, output_file, target_w, target_h, target_fps,
     input_path = clip["file_path"]
     if not os.path.exists(input_path):
         return None
+    # Reject non-media files to prevent ffmpeg from reading arbitrary files
+    input_ext = os.path.splitext(input_path)[1].lower()
+    if input_ext not in MEDIA_EXTENSIONS:
+        print(f"[BSAI Premiere] Skipping non-media file: {input_path} (ext={input_ext})")
+        return None
 
     track_type = clip.get("track_type")
     ext = os.path.splitext(input_path)[1].lower()
@@ -567,11 +572,8 @@ def _build_clip_command(clip, output_file, target_w, target_h, target_fps,
 
         next_input = 1
         audio_input_idx = None
-        if audio_replacement and os.path.exists(audio_replacement):
+        if audio_replacement and os.path.exists(audio_replacement) and os.path.splitext(audio_replacement)[1].lower() in AUDIO_EXTENSIONS:
             cmd.extend(["-i", audio_replacement])
-            audio_input_idx = next_input
-            next_input += 1
-        elif not has_audio or not audio_enabled:
             cmd.extend(["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"])
             audio_input_idx = next_input
             next_input += 1
@@ -617,7 +619,7 @@ def _build_clip_command(clip, output_file, target_w, target_h, target_fps,
     has_audio = clip.get("has_audio", True)
     audio_enabled = clip.get("audio_enabled", True)
     need_silence = False
-    if audio_replacement and os.path.exists(audio_replacement):
+    if audio_replacement and os.path.exists(audio_replacement) and os.path.splitext(audio_replacement)[1].lower() in AUDIO_EXTENSIONS:
         cmd.extend(["-i", audio_replacement])
     elif not has_audio or not audio_enabled:
         need_silence = True
@@ -636,7 +638,7 @@ def _build_clip_command(clip, output_file, target_w, target_h, target_fps,
     if af_filters and (has_audio and audio_enabled or audio_replacement or need_silence):
         cmd.extend(["-af", ",".join(af_filters)])
 
-    if audio_replacement and os.path.exists(audio_replacement):
+    if audio_replacement and os.path.exists(audio_replacement) and os.path.splitext(audio_replacement)[1].lower() in AUDIO_EXTENSIONS:
         cmd.extend(["-map", "0:v:0", "-map", "1:a:0"])
         cmd.extend(["-shortest"])
     elif need_silence:

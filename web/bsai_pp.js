@@ -2390,7 +2390,7 @@ class TimelineEditor {
                     <button class="bsai-pp-track-btn danger" data-track-act="remove" title="Delete Track">✕</button>
                 </div>`;
         }
-        header.innerHTML = `<div class="bsai-pp-track-header-row"><span class="bsai-pp-track-name ${isVideo ? "video" : "audio"}">${trackName}</span></div>${controls}`;
+        header.innerHTML = `<div class="bsai-pp-track-header-row"><span class="bsai-pp-track-name ${isVideo ? "video" : "audio"}">${escapeHtml(trackName)}</span></div>${controls}`;
         header.querySelectorAll("[data-track-act]").forEach(btn => {
             btn.onclick = (e) => { e.stopPropagation(); this._handleTrackAction(trackType, trackIndex, btn.getAttribute("data-track-act")); };
         });
@@ -4897,8 +4897,8 @@ class TimelineEditor {
             ? (this.td.video_tracks?.[clip.track_index]?.name || `V${clip.track_index + 1}`)
             : (this.td.audio_tracks?.[clip.track_index]?.name || `A${clip.track_index + 1}`);
         const trackOptions = isVideo
-            ? (this.td.video_tracks || []).map((t, i) => `<option value="${i}" ${i === clip.track_index ? "selected" : ""}>${t.name || `V${i+1}`}</option>`).join("")
-            : (this.td.audio_tracks || []).map((t, i) => `<option value="${i}" ${i === clip.track_index ? "selected" : ""}>${t.name || `A${i+1}`}</option>`).join("");
+            ? (this.td.video_tracks || []).map((t, i) => `<option value="${i}" ${i === clip.track_index ? "selected" : ""}>${escapeHtml(t.name || `V${i+1}`)}</option>`).join("")
+            : (this.td.audio_tracks || []).map((t, i) => `<option value="${i}" ${i === clip.track_index ? "selected" : ""}>${escapeHtml(t.name || `A${i+1}`)}</option>`).join("");
 
         let html = `
             <div class="bsai-pp-edit-row">
@@ -4910,7 +4910,7 @@ class TimelineEditor {
             </div>
             <div class="bsai-pp-edit-row">
                 <label>Track</label>
-                <span style="color:${isVideo ? "#4a90d9" : "#4caf50"};font-size:12px;font-weight:600;">${isVideo ? "📹" : "🎵"} ${trackName}</span>
+                <span style="color:${isVideo ? "#4a90d9" : "#4caf50"};font-size:12px;font-weight:600;">${isVideo ? "📹" : "🎵"} ${escapeHtml(trackName)}</span>
                 <label>Move To</label>
                 <select data-field="track_index">${trackOptions}</select>
             </div>
