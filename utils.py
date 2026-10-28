@@ -166,6 +166,9 @@ def get_video_info(file_path):
     ffprobe = get_ffprobe()
     if not ffprobe or not os.path.exists(file_path):
         return None
+    # Reject non-media files before probing
+    if os.path.splitext(file_path)[1].lower() not in MEDIA_EXTENSIONS:
+        return None
     try:
         cmd = [
             ffprobe, "-v", "quiet", "-print_format", "json",
