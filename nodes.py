@@ -77,7 +77,7 @@ class BSAIPremiereProTimeline:
                     "default": 0.5, "min": 0.0, "max": 1.5, "step": 0.05,
                     "tooltip": "Detail enhancement strength (HD repair): 0 = off",
                 }),
-                "upscale_face": (["Off", "GFPGANv1.4", "CodeFormer", "SmallFace Enhance (CodeFormer)"], {
+                "upscale_face": (cls.FACE_REPAIR_OPTIONS, {
                     "default": "Off",
                     "tooltip": "Face repair: enable when H3 far-shot small faces look blurry",
                 }),
@@ -97,6 +97,24 @@ class BSAIPremiereProTimeline:
     FUNCTION = "render"
     CATEGORY = "BSAI"
     OUTPUT_NODE = True
+
+    # Face-repair options. Old workflows may still carry the former Chinese
+    # label of the last one, so it stays acceptable on load - see VALIDATE_INPUTS.
+    FACE_REPAIR_OPTIONS = ["Off", "GFPGANv1.4", "CodeFormer", "SmallFace Enhance (CodeFormer)"]
+    LEGACY_FACE_REPAIR = {"小脸增强(CodeFormer)": "SmallFace Enhance (CodeFormer)"}
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, upscale_face=None):
+        # `upscale_face` is the only input named here on purpose: naming an input
+        # is what exempts that single input from the built-in combo check, so the
+        # legacy Chinese label is accepted instead of being rejected as "value
+        # not in list", while every other input of this node keeps its check.
+        # A `**kwargs` signature would exempt all of them, model file lists too.
+        if upscale_face is None or upscale_face in cls.FACE_REPAIR_OPTIONS:
+            return True
+        if upscale_face in cls.LEGACY_FACE_REPAIR:
+            return True
+        return "Invalid upscale_face: %s" % (upscale_face,)
 
     def render(self, watch_directory, auto_import, default_transition,
                transition_duration, output_filename, format,
