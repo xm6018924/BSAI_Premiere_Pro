@@ -22,9 +22,24 @@ function formatTime(seconds) {
 }
 
 function escapeHtml(text) {
-    const div = document.createElement("div");
-    div.textContent = text || "";
-    return div.innerHTML;
+    // Quotes are escaped as well. The result is used inside attribute values
+    // (title="...", value="..."), where a bare " or ' would close the attribute
+    // and let a value from a shared workflow inject extra attributes or a
+    // handler. A div/textContent round-trip leaves quotes untouched, so the
+    // replacements are done explicitly.
+    return String(text ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+// Coerce a value taken from the workflow JSON to a real number before it is
+// interpolated into markup. Anything non-numeric falls back to `fallback`.
+function asNumber(value, fallback = 0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
 }
 
 // ── CSS ──────────────────────────────────────────────────────────────
@@ -4793,8 +4808,9 @@ class TimelineEditor {
             const _umW = this._getWidget("upscale_model");
             const _umOpts = (_umW?.options?.values && _umW.options.values.length) ? _umW.options.values : [upscaleModel];
             const upscaleModelOptions = _umOpts.map(m => `<option value="${escapeHtml(m)}" ${m === upscaleModel ? "selected" : ""}>${escapeHtml(m)}</option>`).join("");
-            // 末项为旧版中文标签：兼容老工作流 JSON 保存值（后端入口会归一化到英文标签）
-            const _faceOpts = ["Off", "GFPGANv1.4", "CodeFormer", "SmallFace Enhance (CodeFormer)", "小脸增强(CodeFormer)"];
+            // English options only. Old workflows that saved the former Chinese
+            // label are still accepted by the node's VALIDATE_INPUTS on load.
+            const _faceOpts = ["Off", "GFPGANv1.4", "CodeFormer", "SmallFace Enhance (CodeFormer)"];
             const upscaleFaceOptions = _faceOpts.map(f => `<option value="${escapeHtml(f)}" ${f === upscaleFace ? "selected" : ""}>${escapeHtml(f)}</option>`).join("");
             panel.innerHTML = `
                 <div class="bsai-pp-edit-row">
@@ -4883,15 +4899,18 @@ class TimelineEditor {
             return;
         }
         const isVideo = clip.track_type === "video";
-        const dur = clip.duration || 0;
-        const trimStart = clip.trim_start || 0;
-        const trimEnd = clip.trim_end || dur;
+        // Numeric clip fields come straight from the workflow JSON. Coerce them
+        // here so every later interpolation into an attribute value is a number
+        // and cannot carry markup.
+        const dur = asNumber(clip.duration);
+        const trimStart = asNumber(clip.trim_start);
+        const trimEnd = asNumber(clip.trim_end) || dur;
         const transIn = clip.transition_in || "cut";
         const transOut = clip.transition_out || "cut";
-        const transDur = clip.transition_duration ?? 0.5;
+        const transDur = asNumber(clip.transition_duration, 0.5);
         const audioRep = clip.audio_replacement || "";
-        const aFadeIn = clip.audio_fade_in || 0;
-        const aFadeOut = clip.audio_fade_out || 0;
+        const aFadeIn = asNumber(clip.audio_fade_in);
+        const aFadeOut = asNumber(clip.audio_fade_out);
         const isLinked = !!clip.linked_id;
         const trackName = isVideo
             ? (this.td.video_tracks?.[clip.track_index]?.name || `V${clip.track_index + 1}`)
@@ -4923,8 +4942,8 @@ class TimelineEditor {
                 <input type="number" min="0" max="${dur}" step="0.1" value="${trimEnd}" data-field="trim_end" data-sync="1">
             </div>`;
         if (isVideo) {
-            const posX = clip.pos_x ?? 0;
-            const posY = clip.pos_y ?? 0;
+            const posX = asNumber(clip.pos_x);
+            const posY = asNumber(clip.pos_y);
             html += `
             <div class="bsai-pp-edit-row">
                 <label>In Transition</label>
