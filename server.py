@@ -11,7 +11,7 @@ from .utils import (
     get_video_info, generate_thumbnail, generate_waveform,
     generate_filmstrip,
     process_and_merge, format_time,
-    _resolve_directory, _confine_comfy_path,
+    _resolve_directory, _confine_comfy_path, STREAMABLE_EXTENSIONS,
 )
 
 
@@ -135,12 +135,16 @@ async def stream_video(request):
     if not file_path or not os.path.exists(file_path):
         return web.Response(status=404, text="File not found")
 
-    file_size = os.path.getsize(file_path)
     ext = os.path.splitext(file_path)[1].lower()
+    if ext not in STREAMABLE_EXTENSIONS:
+        # Only media the editor works with is served here; an uploaded HTML or
+        # SVG file must never be delivered as a page from this origin.
+        return web.Response(status=404, text="File not found")
+    file_size = os.path.getsize(file_path)
     content_type = _CONTENT_TYPE_OVERRIDES.get(ext)
     if not content_type:
         guessed, _ = mimetypes.guess_type(file_path)
-        content_type = guessed or "video/mp4"
+        content_type = guessed or "application/octet-stream"
 
     range_header = request.headers.get("Range")
 
@@ -593,6 +597,11 @@ async def upload_file(request):
             continue
         # Sanitize filename
         filename = os.path.basename(part.filename)
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in STREAMABLE_EXTENSIONS:
+            results.append({"file_name": filename,
+                            "error": "Unsupported file type: upload image, video or audio only"})
+            continue
         save_path = os.path.join(output_dir, filename)
         # Handle duplicate names
         base, ext = os.path.splitext(filename)
@@ -613,7 +622,7 @@ async def upload_file(request):
             continue
         # Get metadata based on file type
         ext = os.path.splitext(filename)[1].lower()
-        image_exts = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tiff", ".tif", ".svg"}
+        image_exts = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tiff", ".tif"}
         audio_exts = {".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".wma", ".opus"}
         if ext in image_exts:
             # Image file: get dimensions via PIL, no audio, no duration
@@ -673,12 +682,9 @@ async def open_explorer(request):
             )
         if not os.path.isdir(confined):
             return web.json_response({"error": f"Not a directory: {confined}"}, status=404)
-        if os.name == "nt":
-            import subprocess
-            subprocess.Popen(["explorer", confined])
-        else:
-            import subprocess
-            subprocess.Popen(["xdg-open", confined])
-        return web.json_response({"success": True, "path": confined})
+        # No file-manager window is opened for a caller: a shared request must
+        # not be able to pop a window on the host desktop. The path is returned
+        # so the editor can show it instead.
+        return web.json_response({"success": True, "path": confined, "opened": False})
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)

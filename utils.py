@@ -12,6 +12,10 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".wmv", ".m
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".wma", ".opus"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".svg"}
 MEDIA_EXTENSIONS = VIDEO_EXTENSIONS | AUDIO_EXTENSIONS | IMAGE_EXTENSIONS
+# Everything the editor can play back may be served by /stream and stored by
+# /upload. ".svg" is deliberately absent: an SVG is a document that can carry
+# script, so it must never be served from the ComfyUI origin.
+STREAMABLE_EXTENSIONS = MEDIA_EXTENSIONS - {".svg"}
 
 # Only the node's advertised container/codec pairs may reach the output filename.
 VIDEO_FORMATS = {
@@ -28,24 +32,45 @@ def _confine_comfy_path(path):
     """Return realpath of path if it lies inside a ComfyUI base dir, else None.
 
     Caller-supplied paths (HTTP routes and node inputs alike) may only touch
-    the ComfyUI input/temp/output directories.
+    the ComfyUI input/temp/output directories. The value is checked as text
+    BEFORE any filesystem call: on Windows, resolving a network-share (UNC)
+    path makes the machine connect to that host and authenticate with the
+    signed-in account, so such values are refused without touching the
+    filesystem at all.
     """
     import folder_paths
-    bases = []
-    for base in (folder_paths.get_input_directory(),
-                 folder_paths.get_temp_directory(),
-                 folder_paths.get_output_directory()):
-        bases.append(os.path.realpath(base))
-    real = os.path.realpath(str(path or "").strip())
-    if not real:
+    raw = str(path or "").strip()
+    if not raw:
         return None
-    for base in bases:
-        try:
-            if os.path.commonpath([base, real]) == base:
-                return real
-        except ValueError:
-            # Different drives on Windows -> not under base.
-            continue
+    # Network-share values (two backslashes or // host/share) - refuse on text.
+    if raw[0:2] in ("\\\\", "//"):
+        return None
+    sep_path = raw.replace("/", os.sep) if os.sep != "/" else raw
+    if sep_path[0:2] == os.sep + os.sep:
+        return None
+    if ".." in [p for p in sep_path.replace("\\", "/").split("/")]:
+        return None
+
+    base_dirs = (folder_paths.get_input_directory(),
+                 folder_paths.get_temp_directory(),
+                 folder_paths.get_output_directory())
+    bases_text = [os.path.normcase(os.path.normpath(b)) for b in base_dirs]
+
+    candidate = sep_path
+    if not os.path.isabs(candidate):
+        # A bare name ("output", "out/clip.mp4") resolves against the ComfyUI
+        # base dir, never the process working directory.
+        candidate = os.path.join(folder_paths.base_path, candidate)
+    cand_text = os.path.normcase(os.path.normpath(candidate))
+    if not any(cand_text == b or cand_text.startswith(b + os.sep) for b in bases_text):
+        return None
+
+    real = os.path.realpath(candidate)
+    real_ci = os.path.normcase(real)
+    for base in bases_text:
+        base_real = os.path.normcase(os.path.realpath(base))
+        if real_ci == base_real or real_ci.startswith(base_real + os.sep):
+            return real
     return None
 
 
