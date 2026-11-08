@@ -693,9 +693,24 @@ async def open_explorer(request):
             )
         if not os.path.isdir(confined):
             return web.json_response({"error": f"Not a directory: {confined}"}, status=404)
-        # No file-manager window is opened for a caller: a shared request must
-        # not be able to pop a window on the host desktop. The path is returned
-        # so the editor can show it instead.
-        return web.json_response({"success": True, "path": confined, "opened": False})
+        # A one-click "open the folder" only for a caller on this machine; any
+        # other client (LAN, port-forwarded browser) just gets the path back,
+        # so a remote request cannot pop a window on the host desktop.
+        opened = False
+        peer = str(getattr(request, "remote", "") or "")
+        if peer in ("127.0.0.1", "::1"):
+            try:
+                if os.name == "nt":
+                    os.startfile(confined)
+                else:
+                    import sys
+                    subprocess.Popen(
+                        ["open" if sys.platform == "darwin" else "xdg-open", confined],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                opened = True
+            except Exception as open_err:
+                print(f"[BSAI Premiere Pro] 打开文件夹失败: {open_err}")
+        return web.json_response({"success": True, "path": confined, "opened": opened})
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
