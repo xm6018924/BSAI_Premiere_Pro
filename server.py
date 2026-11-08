@@ -231,6 +231,17 @@ async def render_video(request):
             upscale_batch = int(data.get("upscale_batch", 4) or 4)
             upscale_detail = float(data.get("upscale_detail", 0.5))
             upscale_face = data.get("upscale_face", "Off")
+            # The upscale plugin is handed these values as-is, so they are
+            # matched against the lists it actually offers here (the combos
+            # live in the node, not on this HTTP route).
+            _allowed_models = utils.get_upscale_model_list()
+            if upscale_model not in _allowed_models:
+                print(f"[BSAI Premiere Pro] upscale_model {upscale_model!r} is not offered; using default")
+                upscale_model = "realesr-general-x4v3.pth"
+            _allowed_faces = ["Off", "GFPGANv1.4", "CodeFormer", "SmallFace Enhance (CodeFormer)"]
+            if upscale_face not in _allowed_faces:
+                print(f"[BSAI Premiere Pro] upscale_face {upscale_face!r} is not offered; using Off")
+                upscale_face = "Off"
             # 旧版中文标签归一化到英文标签（语义/参数完全一致）
             if upscale_face == "小脸增强(CodeFormer)":
                 upscale_face = "SmallFace Enhance (CodeFormer)"
