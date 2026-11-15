@@ -427,6 +427,92 @@ def _resolve_directory(directory):
     return os.path.join(output_dir, directory)
 
 
+def _to_relative_watch(path):
+    """Convert a confined absolute path to a portable ComfyUI-relative widget
+    value (``output/...`` / ``input/...`` / ``temp/...``). Falls back to the
+    absolute path when it does not sit under a known ComfyUI base dir."""
+    if not path:
+        return path
+    try:
+        import folder_paths
+        bases = [
+            ("output", folder_paths.get_output_directory()),
+            ("input", folder_paths.get_input_directory()),
+            ("temp", folder_paths.get_temp_directory()),
+        ]
+        norm = os.path.normcase(os.path.normpath(path))
+        for prefix, base in bases:
+            b = os.path.normcase(os.path.normpath(base))
+            if norm == b:
+                return prefix
+            if norm.startswith(b + os.sep):
+                rel = os.path.relpath(path, base).replace("\\", "/")
+                return f"{prefix}/{rel}"
+    except Exception:
+        pass
+    return path
+
+
+def resolve_directory_by_name(top, file_names=None, max_depth=6):
+    """Locate a ComfyUI-confined directory chosen through the browser folder
+    picker.
+
+    The browser cannot expose an absolute local path (web security), so it only
+    reports the picked top-level folder name plus the names of the files inside
+    it. Match those against the real directories under input/temp/output and
+    return the best confined absolute path, or ``None`` when no safe match can
+    be determined.
+    """
+    top = str(top or "").strip().rstrip("/\\")
+    if not top:
+        return None
+    files = [str(x) for x in (file_names or []) if x]
+    wanted = {os.path.normcase(os.path.basename(f)) for f in files}
+    try:
+        import folder_paths
+        bases = [
+            ("output", folder_paths.get_output_directory()),
+            ("input", folder_paths.get_input_directory()),
+            ("temp", folder_paths.get_temp_directory()),
+        ]
+    except Exception:
+        return None
+
+    SKIP_DIRS = {"models", "checkpoints", "loras", "vae", "clip", "clip_vision",
+                 "controlnet", "upscale_models", "embeddings", "custom_nodes",
+                 ".git", ".venv", "node_modules"}
+    candidates = []
+    for _prefix, base in bases:
+        if not base or not os.path.isdir(base):
+            continue
+        for root, dirs, fnames in os.walk(base):
+            rel = os.path.relpath(root, base)
+            depth = 0 if rel == "." else rel.count(os.sep) + 1
+            if depth >= max_depth:
+                dirs[:] = []
+            else:
+                dirs[:] = [d for d in dirs if d.lower() not in SKIP_DIRS]
+            if os.path.normcase(os.path.basename(root)) == os.path.normcase(top):
+                score = 0
+                if wanted:
+                    present = {os.path.normcase(os.path.basename(f)) for f in fnames}
+                    score = len(wanted & present)
+                candidates.append((score, depth, root))
+    if not candidates:
+        return None
+    # Prefer the folder whose files match the picked set, then the shallower
+    # path; output is listed first in `bases` as a final tie-breaker.
+    candidates.sort(key=lambda c: (-c[0], c[1], c[2]))
+    best_score, _, best = candidates[0]
+    if wanted and best_score == 0:
+        # Picked files do not show up under any same-named folder; only accept a
+        # match when the name is unique, otherwise ask the user for the path.
+        same = [c for c in candidates if c[0] == 0]
+        if len(same) > 1:
+            return None
+    return _confine_comfy_path(best)
+
+
 def scan_video_directory(directory, recursive=True):
     directory = _resolve_directory(directory)
     if not os.path.isdir(directory):

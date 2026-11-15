@@ -42,6 +42,49 @@ function asNumber(value, fallback = 0) {
     return Number.isFinite(n) ? n : fallback;
 }
 
+// Classify a media file by name + metadata. Shared by the auto poller, the
+// Scan button and the manual importer so the auto gate and the audio/video
+// branch decisions stay consistent.
+function classifyMedia(fileName, meta) {
+    const name = fileName || "";
+    const isImage = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(name);
+    const isAudioOnlyExt = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(name);
+    const hasAudioSuffix = /[-_]audio[-_]?\d*\.\w+$/i.test(name);
+    const hasVideoStream = (meta?.width || 0) > 0 && (meta?.height || 0) > 0;
+    const hasAudio = meta?.has_audio || false;
+    // Audio-only ONLY when there is no video stream at all AND the name looks
+    // like an audio file. A muxed `xxx-audio.mp4` that still carries a video
+    // stream stays a video clip; the suffix alone must not demote it.
+    const treatAsAudioOnly = (isAudioOnlyExt || hasAudioSuffix) && !hasVideoStream;
+    return { isImage, isAudioOnlyExt, hasAudioSuffix, hasVideoStream, treatAsAudioOnly, hasAudio };
+}
+
+// Auto-import gate: directory polling / Scan may only pull in videos that
+// carry BOTH a video stream and an audio track. Images, silent videos and
+// standalone audio are skipped on auto; manual import bypasses this gate.
+function isAutoImportAllowed(cls) {
+    return !!cls.hasVideoStream && !!cls.hasAudio;
+}
+
+// Write a value into a node widget and reflect it into the native DOM control.
+// LiteGraph does NOT update the visible input when `widget.value` is assigned
+// directly, so the input element and callback must be refreshed manually;
+// otherwise the widget keeps showing the old text even though the stored
+// value changed.
+function applyWidgetValue(widget, value) {
+    if (!widget) return;
+    widget.value = value;
+    let el = widget.input || widget.element || widget.el;
+    if (el && typeof el.value !== "string" && el.querySelector) {
+        const inp = el.querySelector("input,select");
+        if (inp) el = inp;
+    }
+    if (el) {
+        try { el.value = value; } catch { /* element has no value setter */ }
+    }
+    try { if (typeof widget.callback === "function") widget.callback(value); } catch { /* callback optional */ }
+}
+
 // ── CSS ──────────────────────────────────────────────────────────────
 const STYLES = `
 .bsai-pp-overlay {
@@ -192,6 +235,14 @@ const STYLES = `
 .bsai-pp-track-content.drag-track-over { background: rgba(255,167,38,0.12); box-shadow: inset 0 0 0 2px rgba(255,167,38,0.4); }
 .bsai-pp-clip-block[draggable="true"] { cursor: grab; }
 .bsai-pp-clip-block[draggable="true"]:active { cursor: grabbing; }
+.bsai-pp-clip-block.free-drag-src { opacity: 0.3; }
+.bsai-pp-clip-block.free-drag-src .bsai-pp-clip-thumb img { visibility: hidden; }
+.bsai-pp-drag-ghost {
+    position: fixed; z-index: 9999; pointer-events: none;
+    border: 1px solid #ffa726; border-radius: 4px; opacity: 0.88;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.55); transform: translate(-50%, -50%);
+    background: #23303d;
+}
 .bsai-pp-playhead {
     position: absolute; top: 0; bottom: 0; width: 2px; background: #ff4444;
     z-index: 100; pointer-events: none; box-shadow: 0 0 6px rgba(255,68,68,0.8);
@@ -213,7 +264,7 @@ const STYLES = `
 .bsai-pp-clip-block.batch-selected { border-color: #ff6b6b; box-shadow: 0 0 8px rgba(255,107,107,0.6); background: rgba(255,107,107,0.12); }
 .bsai-pp-clip-block.batch-selected::after { content: "✓"; position: absolute; top: 2px; right: 4px; color: #ff6b6b; font-weight: bold; font-size: 12px; }
 .bsai-pp-clip-block.disabled { opacity: 0.4; }
-.bsai-pp-clip-block.track-locked { opacity: 0.6; cursor: not-allowed !important; }
+.bsai-pp-clip-block.track-locked { opacity: 0.6; cursor: grab; }
 .bsai-pp-clip-block.track-locked::after { content: "🔒"; position: absolute; top: 2px; right: 4px; font-size: 11px; opacity: 0.7; }
 .bsai-pp-clip-thumb {
     flex: 1; background: #111; display: flex; align-items: center;
@@ -591,6 +642,7 @@ function browseDirectoryDialog(initialPath) {
         _addMaximizeBtn(dialog);
 
         let currentPath = "";
+        let currentRel = "";
         let loadingAbort = null;
 
         const renderBreadcrumb = (path) => {
@@ -650,6 +702,7 @@ function browseDirectoryDialog(initialPath) {
                     return;
                 }
                 currentPath = data.path || "";
+                currentRel = data.rel_path || "";
                 const isRoot = data.is_root === true;
                 renderBreadcrumb(currentPath);
                 const manualInput = dialog.querySelector("[data-manual-path]");
@@ -711,7 +764,7 @@ function browseDirectoryDialog(initialPath) {
             if (loadingAbort) { try { loadingAbort.abort(); } catch {} }
             const manualVal = manualInput.value.trim();
             overlay.remove();
-            resolve(manualVal || currentPath);
+            resolve(manualVal || currentRel || currentPath);
         };
     });
 }
@@ -1017,6 +1070,7 @@ class AutoImporter {
             if (vClip.linked_id) {
                 const aClip = allAudioClips.find(c => c.id === vClip.linked_id);
                 if (aClip && !usedAudioIds.has(aClip.id)) {
+                    aClip.start_time = vClip.start_time || 0;
                     newClips.push(aClip);
                     usedAudioIds.add(aClip.id);
                 }
@@ -1060,19 +1114,22 @@ class AutoImporter {
                     skipped++;
                     continue;
                 }
+                const cls = classifyMedia(file.file_name, meta);
+                // Auto gate: only videos with both a video stream and audio enter the timeline.
+                // Images, silent videos and standalone audio are recorded as known and skipped.
+                if (!isAutoImportAllowed(cls)) {
+                    td.known_files.push(file.file_name);
+                    skipped++;
+                    continue;
+                }
                 const vId = `clip_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
                 const aId = `clip_${Date.now() + 1}_${Math.random().toString(36).substr(2, 6)}`;
-                const isAudioOnly = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(file.file_name || "");
-                const hasAudioSuffix = /[-_]audio[-_]?\d*\.\w+$/i.test(file.file_name || "");
-                const hasVideoStream = (meta.width || 0) > 0 && (meta.height || 0) > 0;
-                // Treat as audio-only if:
-                //   1) It is an audio extension (.mp3/.wav/.aac/...)
-                //   2) Its filename ends with `-audio[-_]N.ext`
-                //   3) It has NO video stream at all (e.g. m4a-in-mp4 container, silent files, etc.)
-                // The third rule catches audio files saved with .mp4 extension where name-suffix regex fails.
-                const treatAsAudioOnly = !hasVideoStream || isAudioOnly || hasAudioSuffix;
-                const isImage = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(file.file_name || "");
-                const hasAudio = meta.has_audio || false;
+                const isAudioOnly = cls.isAudioOnlyExt;
+                const hasAudioSuffix = cls.hasAudioSuffix;
+                const hasVideoStream = cls.hasVideoStream;
+                const treatAsAudioOnly = cls.treatAsAudioOnly;
+                const isImage = cls.isImage;
+                const hasAudio = cls.hasAudio;
                 const clipDuration = isImage ? 5 : (meta.duration || 0);
                 const base = {
                     file_path: file.file_path, file_name: file.file_name,
@@ -1184,11 +1241,16 @@ class AutoImporter {
         const imageConnected = this.node.inputs?.some(i => i.name === "image" && i.link != null);
         const audioConnected = this.node.inputs?.some(i => i.name === "audio" && i.link != null);
         const modeLabel = (imageConnected && audioConnected) ? "⚡Auto" : "✋Manual";
+        let baseTitle;
         if (count > 0) {
-            this.node.title = `🎬 BSAI Premiere Pro (${count} clips / ${formatTime(total)}) [${modeLabel}]`;
+            baseTitle = `🎬 BSAI Premiere Pro (${count} clips / ${formatTime(total)}) [${modeLabel}]`;
         } else {
-            this.node.title = `🎬 BSAI Premiere Pro [${modeLabel}]`;
+            baseTitle = `🎬 BSAI Premiere Pro [${modeLabel}]`;
         }
+        // A persistent browse/resolve warning set by the node button must not be
+        // wiped by the periodic title refresh.
+        const warn = this.node._bsaiWarning;
+        this.node.title = warn ? `⚠️ ${warn} · ${baseTitle}` : baseTitle;
         this.node.setDirtyCanvas(true, true);
     }
 }
@@ -1219,6 +1281,8 @@ class TimelineEditor {
         this._playheadTime = null;
         this._isBoxDrag = false;
         this._isBoxSelecting = false;
+        this._freeDrag = null;        // active pointer-based free drag state
+        this._suppressClick = false;  // swallow the click that follows a real drag
         this.td = this._load();
     }
 
@@ -1452,16 +1516,6 @@ class TimelineEditor {
         const trackType = clip.track_type;
         const oldTrackIndex = clip.track_index;
 
-        if (this._isTrackLocked(clip)) {
-            this._toast("Source track is locked, cannot move", "error");
-            return;
-        }
-        const targetTracks = trackType === "video" ? this.td.video_tracks : this.td.audio_tracks;
-        if (targetTracks && targetTracks[newTrackIndex] && targetTracks[newTrackIndex].locked) {
-            this._toast("Target track is locked", "error");
-            return;
-        }
-
         const allTracks = [];
         for (let i = 0; i < (this.td.video_tracks || []).length; i++) {
             allTracks.push({ type: "video", index: i, clips: this._getClipsForTrack("video", i) });
@@ -1489,39 +1543,9 @@ class TimelineEditor {
             }
         }
 
-        // Snap clips to nearby positions (track head, clip ends/starts) for seamless alignment
+        // Free positioning: no neighbor/head/audio snap. The clip lands exactly
+        // where the pointer drops, clamped only to >= 0.
         let finalDropTime = Math.max(0, dropTime);
-        const SNAP_THRESHOLD = 0.5; // seconds
-        let bestSnap = null;
-        let bestSnapDist = SNAP_THRESHOLD;
-        // Snap to track head (position 0)
-        if (finalDropTime < bestSnapDist) {
-            bestSnapDist = finalDropTime;
-            bestSnap = 0;
-        }
-        // Snap to same-track clip ends and starts
-        for (const c of this.td.clips) {
-            if (c === clip || c.track_type !== trackType || c.track_index !== newTrackIndex) continue;
-            const cStart = this._getClipStartTime(c);
-            const cDur = (c.trim_end || c.duration || 0) - (c.trim_start || 0);
-            const cEnd = cStart + cDur;
-            const distEnd = Math.abs(finalDropTime - cEnd);
-            if (distEnd < bestSnapDist) { bestSnapDist = distEnd; bestSnap = cEnd; }
-            const distStart = Math.abs(finalDropTime - cStart);
-            if (distStart < bestSnapDist) { bestSnapDist = distStart; bestSnap = cStart; }
-        }
-        // For audio: also snap to video clip start times
-        if (trackType === "audio") {
-            for (const vClip of this.td.clips) {
-                if (vClip.track_type !== "video") continue;
-                const vStart = this._getClipStartTime(vClip);
-                const dist = Math.abs(finalDropTime - vStart);
-                if (dist < bestSnapDist) { bestSnapDist = dist; bestSnap = vStart; }
-            }
-        }
-        if (bestSnap !== null) {
-            finalDropTime = bestSnap;
-        }
 
         clip.track_index = newTrackIndex;
         clip.start_time = finalDropTime;
@@ -1578,7 +1602,89 @@ class TimelineEditor {
         this._save();
         this._renderAll();
         const label = trackType === "audio" ? "audio" : "video";
-        this._toast(`Moved ${label} to ${formatTime(finalDropTime)}${finalDropTime !== dropTime ? " (snapped)" : ""}`, "success");
+        this._toast(`Moved ${label} to ${formatTime(finalDropTime)}`, "success");
+    }
+
+    // ── Pointer-based free drag (replaces fragile HTML5 native DnD) ──
+    // The clip follows the pointer with a floating ghost and drops at the exact
+    // cursor position. No snap, no track-lock / mode gating, no overlap lock.
+    _attachFreeDrag(block, clip, clipIndex, startEvent) {
+        if (!startEvent || !block || !clip) return;
+        const pps = this._pps || 15;
+        const startX = startEvent.clientX;
+        const startY = startEvent.clientY;
+        const origStart = this._getClipStartTime(clip);
+        const origTrackIndex = clip.track_index;
+        const clipW = block.offsetWidth;
+        const clipH = block.offsetHeight;
+        const THRESHOLD = 4; // px before a press becomes a drag
+        let started = false;
+        let ghost = null;
+        let pending = null;
+
+        const resolveTarget = (ev) => {
+            const el = document.elementFromPoint(ev.clientX, ev.clientY);
+            const content = el && el.closest ? el.closest(".bsai-pp-track-content") : null;
+            if (!content) return null;
+            const trackType = content.dataset.trackType || clip.track_type;
+            // Keep a clip on its own track type: video -> video, audio -> audio.
+            if (trackType !== clip.track_type) return null;
+            const trackIndex = Number(content.dataset.trackIndex ?? origTrackIndex);
+            const rect = content.getBoundingClientRect();
+            const dropTime = Math.max(0, (ev.clientX - rect.left) / pps);
+            return { trackType, trackIndex, dropTime };
+        };
+
+        const onMove = (ev) => {
+            const dx = ev.clientX - startX;
+            const dy = ev.clientY - startY;
+            if (!started) {
+                if (Math.abs(dx) < THRESHOLD && Math.abs(dy) < THRESHOLD) return;
+                started = true;
+                this._freeDrag = { clipIndex };
+                ghost = block.cloneNode(true);
+                ghost.classList.remove("free-drag-src");
+                ghost.classList.add("bsai-pp-drag-ghost");
+                block.classList.add("free-drag-src");
+                ghost.style.width = clipW + "px";
+                ghost.style.height = clipH + "px";
+                document.body.appendChild(ghost);
+            }
+            ev.preventDefault();
+            pending = resolveTarget(ev);
+            if (ghost) {
+                ghost.style.left = ev.clientX + "px";
+                ghost.style.top = ev.clientY + "px";
+            }
+        };
+
+        const onUp = () => {
+            document.removeEventListener("mousemove", onMove);
+            document.removeEventListener("mouseup", onUp);
+            if (!started) { this._freeDrag = null; return; }
+            // Swallow the click that fires right after a real drag.
+            this._suppressClick = true;
+            setTimeout(() => { this._suppressClick = false; }, 120);
+            block.classList.remove("free-drag-src");
+            if (ghost) { ghost.remove(); ghost = null; }
+            this._freeDrag = null;
+            const clipNow = this.td.clips[clipIndex];
+            if (!clipNow) { this._renderTimeline(); return; }
+            if (pending) {
+                const sameTrack = pending.trackIndex === origTrackIndex;
+                const movedTime = Math.abs(pending.dropTime - origStart) > 0.001;
+                if (!sameTrack || movedTime) {
+                    this._moveClipToPosition(clipIndex, pending.trackIndex, pending.dropTime);
+                } else {
+                    this._renderTimeline();
+                }
+            } else {
+                this._renderTimeline();
+            }
+        };
+
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
     }
 
     _save() {
@@ -2416,6 +2522,8 @@ class TimelineEditor {
 
         const content = document.createElement("div");
         content.className = "bsai-pp-track-content";
+        content.dataset.trackType = trackType;
+        content.dataset.trackIndex = String(trackIndex);
         // Override fixed CSS min-height to use dynamic height
         content.style.minHeight = (trackH - 8) + "px";
         const rulerWidth = Math.round(((this._totalDuration || 30) + 10) * (this._pps || 15));
@@ -2461,33 +2569,9 @@ class TimelineEditor {
         // Right-click context menu on track content (close gaps / delete)
         content.addEventListener("contextmenu", (e) => {
             if (e.target.closest("[data-clip-idx]")) return; // clip handles its own
-            this._showTimelineContextMenu(e, trackType, trackIndex);
-        });
-        // Allow dropping clips onto track content (for empty tracks or free positioning)
-        content.addEventListener("dragover", (e) => {
-            if (!this._dragData) return;
-            if (this._dragData.trackType !== trackType) return;
-            if (trackInfo.locked) return;
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "move";
-            content.classList.add("drag-track-over");
-        });
-        content.addEventListener("dragleave", () => {
-            content.classList.remove("drag-track-over");
-        });
-        content.addEventListener("drop", (e) => {
-            content.classList.remove("drag-track-over");
-            if (!this._dragData) return;
-            if (this._dragData.trackType !== trackType) return;
-            if (trackInfo.locked) return;
-            if (e.target.closest("[data-clip-idx]")) return;
-            e.preventDefault();
-            const fromIdx = this._dragData.clipIndex;
             const rect = content.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const pps = this._pps || 15;
-            const dropTime = Math.max(0, x / pps);
-            this._moveClipToPosition(fromIdx, trackIndex, dropTime);
+            const cursorTime = Math.max(0, (e.clientX - rect.left) / (this._pps || 15));
+            this._showTimelineContextMenu(e, trackType, trackIndex, cursorTime);
         });
         this._attachBoxSelection(content, trackType, trackIndex);
         return row;
@@ -4211,7 +4295,7 @@ class TimelineEditor {
             // Allow clicking gap to remove it (fill gap)
             block.onclick = (e) => {
                 e.stopPropagation();
-                if (this._isBoxDrag) return;
+                if (this._isBoxDrag || this._suppressClick) return;
                 if (confirm("Remove this empty slot? Following clips will shift forward.")) {
                     this.td.clips = this.td.clips.filter((c, i) => i !== clipIndex);
                     if (this.selectedIndex >= this.td.clips.length) this.selectedIndex = -1;
@@ -4268,7 +4352,7 @@ class TimelineEditor {
         if (this.batchMode) {
             block.onclick = (e) => {
                 e.stopPropagation();
-                if (this._isBoxDrag) return;
+                if (this._isBoxDrag || this._suppressClick) return;
                 if (this.batchSelected.has(clipIndex)) {
                     this.batchSelected.delete(clipIndex);
                 } else {
@@ -4281,12 +4365,12 @@ class TimelineEditor {
             block.classList.add("scissor-mode");
             block.onclick = (e) => {
                 e.stopPropagation();
-                if (this._isBoxDrag) return;
+                if (this._isBoxDrag || this._suppressClick) return;
                 this._splitClip(clip, clipIndex, e);
             };
         } else {
             block.onclick = (e) => {
-                if (this._isBoxDrag) return;
+                if (this._isBoxDrag || this._suppressClick) return;
                 if (e.shiftKey) {
                     // Shift+click for multi-select (auto-include linked partner)
                     if (this.boxSelected.has(clipIndex)) {
@@ -4315,13 +4399,14 @@ class TimelineEditor {
                 }
             };
         }
-        // Prevent mousedown from bubbling to track content when clip block is draggable,
-        // so that box selection doesn't start and block native dragstart.
+        // Stop mousedown from bubbling to track content so box selection doesn't
+        // start when pressing a clip; free drag is started below.
         block.onmousedown = (e) => {
             if (e.button !== 0) return;
-            if (!this.batchMode && !this.scissorMode && !this._isTrackLocked(clip)) {
-                e.stopPropagation();
-            }
+            // Trim handles wire their own mousedown; don't start a clip drag there.
+            if (e.target.closest(".bsai-pp-clip-handle")) return;
+            e.stopPropagation();
+            this._attachFreeDrag(block, clip, clipIndex, e);
         };
         // Right-click on clip: select it then show context menu (close gaps / delete)
         block.oncontextmenu = (e) => {
@@ -4331,7 +4416,7 @@ class TimelineEditor {
                 this.boxSelected.clear();
                 this._renderTimeline();
             }
-            this._showTimelineContextMenu(e, clip.track_type, clip.track_index);
+            this._showTimelineContextMenu(e, clip.track_type, clip.track_index, null);
         };
         // Add resize handles for trim (not on locked tracks)
         if (!this.batchMode && !this.scissorMode && !isLocked) {
@@ -4344,48 +4429,9 @@ class TimelineEditor {
             this._attachTrimHandler(rightHandle, clip, "end");
             block.appendChild(rightHandle);
         }
-        // Drag-to-reorder (not in batch, scissor mode, or locked tracks)
-        if (!this.batchMode && !this.scissorMode && !isLocked) {
-            block.draggable = true;
-            block.addEventListener("dragstart", (e) => {
-                if (this._isBoxSelecting) { e.preventDefault(); return; }
-                this._dragData = { clipIndex, trackType: clip.track_type, trackIndex: clip.track_index };
-                e.dataTransfer.effectAllowed = "move";
-                e.dataTransfer.setData("text/plain", String(clipIndex));
-                block.style.opacity = "0.5";
-            });
-            block.addEventListener("dragend", () => {
-                block.style.opacity = "";
-                this._dragData = null;
-                this._renderTimeline();
-            });
-            block.addEventListener("dragover", (e) => {
-                if (!this._dragData) return;
-                if (this._dragData.trackType !== clip.track_type) return;
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-                block.classList.add("drag-over");
-            });
-            block.addEventListener("dragleave", () => {
-                block.classList.remove("drag-over");
-            });
-            block.addEventListener("drop", (e) => {
-                e.preventDefault();
-                block.classList.remove("drag-over");
-                if (!this._dragData) return;
-                if (this._dragData.trackType !== clip.track_type) return;
-                const fromIdx = this._dragData.clipIndex;
-                // Always calculate drop time from mouse position for free positioning
-                const trackContent = block.closest(".bsai-pp-track-content");
-                const rect = trackContent?.getBoundingClientRect();
-                if (rect) {
-                    const x = e.clientX - rect.left;
-                    const pps = this._pps || 15;
-                    const dropTime = Math.max(0, x / pps);
-                    this._moveClipToPosition(fromIdx, clip.track_index, dropTime);
-                }
-            });
-        }
+        // Free pointer-based drag is wired in block.onmousedown above. It works in
+        // batch / scissor / locked states and lands exactly where the pointer drops.
+        block.draggable = false;
         // Box-selected indicator
         if (this.boxSelected.has(clipIndex)) {
             block.classList.add("box-selected");
@@ -5290,6 +5336,8 @@ class TimelineEditor {
             if (vClip.linked_id) {
                 const aClip = allAudioClips.find(c => c.id === vClip.linked_id);
                 if (aClip && !usedAudioIds.has(aClip.id)) {
+                    // Keep the linked audio locked to its video's start so the pair stays aligned.
+                    aClip.start_time = vClip.start_time || 0;
                     newClips.push(aClip);
                     usedAudioIds.add(aClip.id);
                     continue;
@@ -5348,7 +5396,7 @@ class TimelineEditor {
                 if (newFiles.length > 0) {
                     let added = 0;
                     for (const file of newFiles) {
-                        const ok = await this._addClipFromFile(file);
+                        const ok = await this._addClipFromFile(file, { auto: true });
                         if (ok) added++;
                     }
                     this._autoLinkClips();
@@ -5371,7 +5419,7 @@ class TimelineEditor {
         }
     }
 
-    async _addClipFromFile(file) {
+    async _addClipFromFile(file, opts = {}) {
         try {
             // Use metadata from upload response if available, otherwise fetch it
             let meta;
@@ -5383,13 +5431,23 @@ class TimelineEditor {
                 meta = await metaResp.json();
                 if (meta.error) { this._toast(meta.error, "error"); return false; }
             }
-            const isImage = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(file.file_name || "");
-            const isAudioOnly = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(file.file_name || "");
-            const hasAudioSuffix = /[-_]audio[-_]?\d*\.\w+$/i.test(file.file_name || "");
-            const hasVideoStream = (meta.width || 0) > 0 && (meta.height || 0) > 0;
-            const treatAsAudioOnly = (isAudioOnly || hasAudioSuffix) && !hasVideoStream;
+            const cls = classifyMedia(file.file_name, meta);
+            // Auto gate (Scan button): only videos with both video stream and audio
+            // are imported. Manual entry paths do not pass opts.auto, so they keep
+            // accepting video / audio / image of every kind.
+            if (opts.auto === true && !isAutoImportAllowed(cls)) {
+                if (file.file_name && !(this.td.known_files || []).includes(file.file_name)) {
+                    (this.td.known_files = this.td.known_files || []).push(file.file_name);
+                }
+                return false;
+            }
+            const isImage = cls.isImage;
+            const isAudioOnly = cls.isAudioOnlyExt;
+            const hasAudioSuffix = cls.hasAudioSuffix;
+            const hasVideoStream = cls.hasVideoStream;
+            const treatAsAudioOnly = cls.treatAsAudioOnly;
             const duration = meta.duration || (isImage ? 5 : 0);
-            const hasAudio = meta.has_audio || false;
+            const hasAudio = cls.hasAudio;
             const vId = `clip_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
             const aId = `clip_${Date.now() + 1}_${Math.random().toString(36).substr(2, 6)}`;
             const base = {
@@ -5725,6 +5783,42 @@ class TimelineEditor {
         return total;
     }
 
+    _clipDuration(clip) {
+        return (clip.trim_end || clip.duration || 0) - (clip.trim_start || 0);
+    }
+
+    // Ripple-close the single gap under the cursor: the anchor clip (first clip
+    // starting after cursorTime) and every clip after it on this track shift
+    // forward by that gap's duration. Linked partners shift by the same delta.
+    _closeGapAtTime(trackType, trackIndex, cursorTime) {
+        if (typeof cursorTime !== "number") return 0;
+        const clips = this.td.clips.filter(c => !c.is_gap && c.track_type === trackType && c.track_index === trackIndex);
+        if (clips.length === 0) return 0;
+        clips.sort((a, b) => this._getClipStartTime(a) - this._getClipStartTime(b));
+        const anchorIdx = clips.findIndex(c => this._getClipStartTime(c) > cursorTime + 0.02);
+        if (anchorIdx < 0) return 0;
+        const anchor = clips[anchorIdx];
+        const prev = anchorIdx > 0 ? clips[anchorIdx - 1] : null;
+        const prevEnd = prev ? this._getClipStartTime(prev) + this._clipDuration(prev) : 0;
+        const anchorStart = this._getClipStartTime(anchor);
+        const gap = anchorStart - prevEnd;
+        if (gap <= 0.02) return 0;
+        const moved = [];
+        for (let i = anchorIdx; i < clips.length; i++) {
+            const c = clips[i];
+            c.start_time = Math.max(0, this._getClipStartTime(c) - gap);
+            moved.push(c);
+        }
+        for (const c of moved) {
+            if (!c.linked_id) continue;
+            const linked = this.td.clips.find(x => x.id === c.linked_id);
+            if (linked && !moved.includes(linked)) {
+                linked.start_time = Math.max(0, this._getClipStartTime(linked) - gap);
+            }
+        }
+        return moved.length;
+    }
+
     _rippleDeleteShift(deletedClipsInfo) {
         // After deleting clips, close all gaps on every affected track so
         // remaining clips snap tight against each other (no leftover empty space).
@@ -5736,7 +5830,7 @@ class TimelineEditor {
         }
     }
 
-    _showTimelineContextMenu(e, trackType, trackIndex) {
+    _showTimelineContextMenu(e, trackType, trackIndex, cursorTime) {
         e.preventDefault();
         e.stopPropagation();
         this._closeContextMenu();
@@ -5744,12 +5838,16 @@ class TimelineEditor {
         menu.className = 'bsai-pp-ctx-menu';
         menu.style.left = e.clientX + 'px';
         menu.style.top = e.clientY + 'px';
-        const trackLabel = trackType === 'video' ? 'video track' : 'audio track';
+        const trackLabel = trackType === 'video' ? '视频轨' : '音频轨';
+        const hereItem = (typeof cursorTime === "number")
+            ? `<div class="ctx-item" data-act="close-gap-here"><span class="ctx-icon">⇤</span>删除此段空隙（后方片段前移）</div>`
+            : "";
         menu.innerHTML = `
-            <div class="ctx-item" data-act="close-gap-track"><span class="ctx-icon">⇤</span>Close Gap on ${trackLabel}</div>
-            <div class="ctx-item" data-act="close-gap-all"><span class="ctx-icon">⇤</span>Close All Track Gaps</div>
+            ${hereItem}
+            <div class="ctx-item" data-act="close-gap-track"><span class="ctx-icon">⇤</span>删除段间空隙（当前${trackLabel}）</div>
+            <div class="ctx-item" data-act="close-gap-all"><span class="ctx-icon">⇤</span>删除全部段间空隙</div>
             <div class="ctx-sep"></div>
-            <div class="ctx-item danger" data-act="delete-selected"><span class="ctx-icon">🗑</span>Delete Selected Clips</div>
+            <div class="ctx-item danger" data-act="delete-selected"><span class="ctx-icon">🗑</span>删除选中片段</div>
         `;
         document.body.appendChild(menu);
         menu.querySelectorAll('.ctx-item').forEach(item => {
@@ -5757,21 +5855,25 @@ class TimelineEditor {
                 ev.stopPropagation();
                 const act = item.getAttribute('data-act');
                 this._closeContextMenu();
-                if (act === 'close-gap-track') {
+                if (act === 'close-gap-here') {
+                    const n = this._closeGapAtTime(trackType, trackIndex, cursorTime);
+                    this._save(); this._renderAll();
+                    this._toast(n > 0 ? `已删除空隙，前移 ${n} 个片段` : '此处没有可删除的空隙', n > 0 ? 'success' : 'info');
+                } else if (act === 'close-gap-track') {
                     const n = this._closeGapsOnTrack(trackType, trackIndex);
                     this._save(); this._renderAll();
-                    this._toast(n > 0 ? `Closed gap on ${trackLabel}, moved ${n} clips` : `${trackLabel} has no gap`, n > 0 ? 'success' : 'info');
+                    this._toast(n > 0 ? `已收拢${trackLabel}空隙，移动 ${n} 个片段` : `${trackLabel}已对齐`, n > 0 ? 'success' : 'info');
                 } else if (act === 'close-gap-all') {
                     const n = this._closeAllGaps();
                     this._save(); this._renderAll();
-                    this._toast(n > 0 ? `Closed gaps on all tracks, moved ${n} clips` : 'All tracks are already aligned', n > 0 ? 'success' : 'info');
+                    this._toast(n > 0 ? `已收拢全部轨道空隙，移动 ${n} 个片段` : '所有轨道已对齐', n > 0 ? 'success' : 'info');
                 } else if (act === 'delete-selected') {
                     if (this.boxSelected.size > 0) {
                         this._deleteBoxSelected();
                     } else if (this.selectedIndex >= 0) {
                         this._deleteClip(this.selectedIndex);
                     } else {
-                        this._toast('No clips selected', 'info');
+                        this._toast('未选中片段', 'info');
                     }
                 }
             };
@@ -6352,126 +6454,107 @@ function _registerBsaiPP() {
             return r;
         };
 
-        // ── Browse directory method (used by button + right-click menu) ──
-        nodeType.prototype._bsaiBrowseDir = function () {
+        // ── Browse watch directory (native OS folder picker; button + menu) ──
+        nodeType.prototype._bsaiBrowseDir = async function () {
             const dirWidget = this.widgets?.find(w => w.name === "watch_directory");
             const oldDir = dirWidget?.value || "";
-            const dirInput = document.createElement("input");
-            dirInput.type = "file";
-            dirInput.setAttribute("webkitdirectory", "");
-            dirInput.style.display = "none";
-            document.body.appendChild(dirInput);
-            dirInput.onchange = async () => {
-                            const files = Array.from(dirInput.files || []);
-                            document.body.removeChild(dirInput);
-                            if (files.length === 0) return;
-                            // Filter media files
-                            const mediaFiles = files.filter(f => /\.(mp4|avi|mov|mkv|webm|flv|wmv|m4v|mpg|mpeg|ts|3gp|mp3|wav|aac|flac|ogg|m4a|wma|opus|png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(f.name));
-                            if (mediaFiles.length === 0) return;
-                            // Save current state to directory_history
-                            let td;
-                            try { td = JSON.parse(this.properties?.bsai_td || '{}'); } catch { td = {}; }
-                            if (!td.clips) td.clips = [];
-                            if (!td.known_files) td.known_files = [];
-                            if (!td.deleted_files) td.deleted_files = [];
-                            if (!td.directory_history) td.directory_history = {};
-                            if (!td.video_tracks) td.video_tracks = [{ name: "V1", locked: false, visible: true }];
-                            if (!td.audio_tracks) td.audio_tracks = [{ name: "A1", locked: false, muted: false, solo: false }];
-                            if (oldDir) {
-                                td.directory_history[oldDir] = {
-                                    clips: td.clips, known_files: td.known_files, deleted_files: td.deleted_files,
-                                    video_tracks: td.video_tracks, audio_tracks: td.audio_tracks,
-                                };
-                            }
-                            // Clear current timeline for new directory
-                            td.clips = [];
-                            td.known_files = [];
-                            td.deleted_files = [];
-                            // Upload all media files to server and create clips directly
-                            for (const file of mediaFiles) {
-                                try {
-                                    const formData = new FormData();
-                                    formData.append("file", file, file.name);
-                                    const resp = await api.fetchApi("/bsai_premiere_pro/upload", { method: "POST", body: formData });
-                                    const result = await resp.json();
-                                    const fi = (result.files || [])[0];
-                                    if (!fi || fi.error) continue;
-                                    const isImg = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(fi.file_name);
-                                    const isAudioOnly = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(fi.file_name);
-                                    const hasAudSuffix = /[-_]audio[-_]?\d*\.\w+$/i.test(fi.file_name);
-                                    const dur = fi.duration || (isImg ? 5 : 0);
-                                    const hasAud = fi.has_audio || false;
-                                    const vId = `clip_${Date.now()}_${Math.random().toString(36).substr(2,6)}`;
-                                    const aId = `clip_${Date.now()+1}_${Math.random().toString(36).substr(2,6)}`;
-                                    const base = {
-                                        file_path: fi.file_path, file_name: fi.file_name,
-                                        created_time: Date.now()/1000, duration: dur,
-                                        width: fi.width || (isAudioOnly ? 0 : 1080), height: fi.height || (isAudioOnly ? 0 : 1920),
-                                        fps: fi.fps || 30, has_audio: hasAud,
-                                        trim_start: 0, trim_end: dur,
-                                        transition_in: "cut", transition_out: "cut",
-                                        transition_duration: 0.5, audio_replacement: null,
-                                        audio_fade_in: 0, audio_fade_out: 0,
-                                        video_enabled: true, audio_enabled: true,
-                                    };
-                                    if (isAudioOnly || hasAudSuffix) {
-                                        // Find the audio track with the latest end time across all tracks
-                                        const aTracks = td.audio_tracks || [{ name: "A1", locked: false }];
-                                        let bestATrackIdx = -1;
-                                        let bestAEnd = -1;
-                                        for (let i = 0; i < aTracks.length; i++) {
-                                            const tClips = (td.clips || []).filter(c => c.track_type === "audio" && c.track_index === i);
-                                            let tEnd = 0;
-                                            for (const c of tClips) {
-                                                const cStart = typeof c.start_time === 'number' ? c.start_time : 0;
-                                                const end = cStart + ((c.trim_end || c.duration || 0) - (c.trim_start || 0));
-                                                if (end > tEnd) tEnd = end;
-                                            }
-                                            if (tEnd > bestAEnd) {
-                                                bestAEnd = tEnd;
-                                                bestATrackIdx = i;
-                                            }
-                                        }
-                                        if (bestATrackIdx < 0) bestATrackIdx = Math.max(0, aTracks.length - 1);
-                                        if (bestAEnd < 0) bestAEnd = 0;
-                                        td.clips.push({ ...base, id: aId, track_type: "audio", track_index: bestATrackIdx, linked_id: null, is_video_part: false, start_time: bestAEnd });
-                                    } else if (isImg || !hasAud) {
-                                        td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: null, is_video_part: true });
-                                    } else {
-                                        // Video with audio: place at max end of video OR audio track to keep aligned
-                                        let vEnd2 = 0;
-                                        for (const c of (td.clips || [])) {
-                                            if (c.track_type !== "video" || c.track_index !== 0) continue;
-                                            const cStart = typeof c.start_time === 'number' ? c.start_time : 0;
-                                            const end = cStart + ((c.trim_end || c.duration || 0) - (c.trim_start || 0));
-                                            if (end > vEnd2) vEnd2 = end;
-                                        }
-                                        let aEnd2 = 0;
-                                        for (const c of (td.clips || [])) {
-                                            if (c.track_type !== "audio" || c.track_index !== 0) continue;
-                                            const cStart = typeof c.start_time === 'number' ? c.start_time : 0;
-                                            const end = cStart + ((c.trim_end || c.duration || 0) - (c.trim_start || 0));
-                                            if (end > aEnd2) aEnd2 = end;
-                                        }
-                                        const clipStart2 = Math.max(vEnd2, aEnd2);
-                                        td.clips.push({ ...base, id: vId, track_type: "video", track_index: 0, linked_id: aId, is_video_part: true, start_time: clipStart2 });
-                                        td.clips.push({ ...base, id: aId, track_type: "audio", track_index: 0, linked_id: vId, is_video_part: false, start_time: clipStart2 });
-                                    }
-                                    td.known_files.push(fi.file_name);
-                                } catch (e) { /* skip failed */ }
-                            }
-                            // Set watch directory to upload directory
-                            const uploadDir = "output/bsai_imports";
-                            if (dirWidget) dirWidget.value = uploadDir;
-                            this.properties.bsai_td = JSON.stringify(td);
-                            _syncToServer(this);
-                            const importer = importerMap.get(this.id);
-                            if (importer) {
-                                importer.updateNodeTitle(td);
-                            }
+            const importer = importerMap.get(this.id);
+
+            // The browser's <input webkitdirectory> opens the native Explorer
+            // folder picker on the interactive desktop. A server-spawned WinForms
+            // dialog cannot surface here (ComfyUI runs on a non-interactive window
+            // station), so we resolve the chosen folder back to a server-side
+            // path by name on the backend.
+            const input = document.createElement("input");
+            input.type = "file";
+            input.setAttribute("webkitdirectory", "");
+            input.style.display = "none";
+            document.body.appendChild(input);
+
+            const picked = await new Promise((resolve) => {
+                let settled = false;
+                const done = (files) => { if (!settled) { settled = true; resolve(files); } };
+                input.onchange = () => done(Array.from(input.files || []));
+                input.oncancel = () => done([]);
+                input.click();
+            });
+            if (document.body.contains(input)) document.body.removeChild(input);
+
+            if (picked.length === 0) return; // canceled, or an empty folder
+
+            const rels = picked.map(f => f.webkitRelativePath || f.name);
+            const top = (rels[0] || "").split("/")[0];
+            const names = picked.map(f => f.name);
+
+            let data;
+            try {
+                const resp = await api.fetchApi("/bsai_premiere_pro/resolve_directory", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ top, rels, files: names }),
+                });
+                data = await resp.json();
+            } catch (e) {
+                console.warn("[BSAI PP] resolve_directory request failed:", e);
+                this._bsaiWarning = "Folder picker unavailable (backend offline)";
+                this.title = "⚠️ " + this._bsaiWarning;
+                this.setDirtyCanvas?.(true, true);
+                return;
+            }
+            if (!data || data.canceled) return;
+            if (data.error) {
+                console.warn("[BSAI PP] resolve_directory:", data.error);
+                this._bsaiWarning = String(data.error).slice(0, 60);
+                this.title = "⚠️ " + this._bsaiWarning;
+                this.setDirtyCanvas?.(true, true);
+                return;
+            }
+            const newDir = String(data.rel_path || data.path || "").trim();
+            if (!newDir) return;
+
+            let td;
+            try { td = JSON.parse(this.properties?.bsai_td || '{}'); } catch { td = {}; }
+            if (!td.clips) td.clips = [];
+            if (!td.known_files) td.known_files = [];
+            if (!td.deleted_files) td.deleted_files = [];
+            if (!td.directory_history) td.directory_history = {};
+            if (!td.video_tracks) td.video_tracks = [{ name: "V1", locked: false, visible: true }];
+            if (!td.audio_tracks) td.audio_tracks = [{ name: "A1", locked: false, muted: false, solo: false }];
+
+            // Remember the current timeline under the old directory, then restore
+            // whatever was stored for the chosen directory (or start empty).
+            if (oldDir && oldDir !== newDir) {
+                td.directory_history[oldDir] = {
+                    clips: td.clips, known_files: td.known_files, deleted_files: td.deleted_files,
+                    video_tracks: td.video_tracks, audio_tracks: td.audio_tracks,
+                };
+                const hist = td.directory_history[newDir];
+                if (hist) {
+                    td.clips = hist.clips || [];
+                    td.known_files = hist.known_files || [];
+                    td.deleted_files = hist.deleted_files || [];
+                    td.video_tracks = hist.video_tracks || td.video_tracks;
+                    td.audio_tracks = hist.audio_tracks || td.audio_tracks;
+                } else {
+                    td.clips = [];
+                    td.known_files = [];
+                    td.deleted_files = [];
+                }
+            }
+
+            // Write the chosen server-side folder back to the watch widget so the
+            // poller / Scan reads it directly from disk (no local re-upload), and
+            // refresh the native input so the visible text matches the new value.
+            this._bsaiWarning = null;
+            applyWidgetValue(dirWidget, newDir);
+            this.properties.bsai_td = JSON.stringify(td);
+            _syncToServer(this);
+            if (importer) {
+                importer.updateNodeTitle(td);
+                setTimeout(() => importer.poll(), 100);
+            }
+            _forceResize(this);
         };
-        dirInput.click();
-    };
 
     // ── Open timeline editor method (used by button + right-click menu) ──
     nodeType.prototype._bsaiOpenEditor = function () {

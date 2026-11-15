@@ -11,7 +11,8 @@ from .utils import (
     get_video_info, generate_thumbnail, generate_waveform,
     generate_filmstrip,
     process_and_merge, format_time,
-    _resolve_directory, _confine_comfy_path, STREAMABLE_EXTENSIONS,
+    _resolve_directory, _confine_comfy_path, _to_relative_watch,
+    resolve_directory_by_name, STREAMABLE_EXTENSIONS,
 )
 
 
@@ -378,6 +379,7 @@ async def browse_directories(request):
         )
         if error:
             return web.json_response({"error": error, "path": path}, status=400)
+        result["rel_path"] = _to_relative_watch(result.get("path") or "")
         return web.json_response(result)
     except asyncio.TimeoutError:
         return web.json_response({"error": f"Directory scan timed out (30s): {path}", "path": path}, status=504)
@@ -472,6 +474,42 @@ async def browse_files(request):
         return web.json_response({"error": f"File scan timed out (30s): {path}", "path": path}, status=504)
     except Exception as e:
         return web.json_response({"error": str(e), "path": path}, status=500)
+
+
+@PromptServer.instance.routes.post("/bsai_premiere_pro/resolve_directory")
+async def resolve_directory(request):
+    """Resolve a folder chosen through the browser's native Explorer picker
+    back to a ComfyUI-confined watch directory.
+
+    The browser cannot hand us an absolute local path, so it sends the picked
+    top-level folder name plus the names of the files inside it; the backend
+    matches those against real directories under input/temp/output.
+    """
+    import asyncio
+    peer = str(getattr(request, "remote", "") or "")
+    if peer not in ("127.0.0.1", "::1"):
+        return web.json_response(
+            {"error": "Directory resolution is only available on the local machine"},
+            status=403,
+        )
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    top = str(body.get("top") or "").strip()
+    files = body.get("files") or []
+    if not top:
+        return web.json_response({"error": "No directory selected"}, status=400)
+    try:
+        chosen = await asyncio.to_thread(resolve_directory_by_name, top, files)
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+    if not chosen:
+        return web.json_response(
+            {"error": "Could not locate folder '%s' under ComfyUI input/temp/output. Type the relative path manually." % top},
+            status=404,
+        )
+    return web.json_response({"path": chosen, "rel_path": _to_relative_watch(chosen)})
 
 
 @PromptServer.instance.routes.post("/bsai_premiere_pro/timeline_save")
