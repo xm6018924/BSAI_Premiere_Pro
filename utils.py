@@ -390,6 +390,13 @@ def generate_waveform(file_path, num_samples=200):
 
 
 def _resolve_directory(directory):
+    """Resolve a watch-directory widget value to an absolute path.
+
+    The editor stores ComfyUI-relative values such as "output/bsai_imports" or
+    "input/clips". Those must resolve against the matching ComfyUI base dir -
+    joining "output/..." under the output dir again produced
+    <output>/output/... and every scan came back empty.
+    """
     if not directory or directory.strip() == "":
         try:
             import folder_paths
@@ -401,10 +408,22 @@ def _resolve_directory(directory):
     try:
         import folder_paths
         output_dir = folder_paths.get_output_directory()
+        base_map = {
+            "output": output_dir,
+            "input": folder_paths.get_input_directory(),
+            "temp": folder_paths.get_temp_directory(),
+        }
     except Exception:
         output_dir = os.getcwd()
+        base_map = {"output": output_dir}
     if directory.lower() in ("output", "output/", "output\\", "."):
         return output_dir
+    # "output/xxx", "input/xxx", "temp/xxx" -> base dir + the rest
+    norm = directory.replace("\\", "/").strip()
+    low = norm.lower()
+    for prefix, base in base_map.items():
+        if low.startswith(prefix + "/"):
+            return os.path.join(base, norm[len(prefix) + 1:])
     return os.path.join(output_dir, directory)
 
 

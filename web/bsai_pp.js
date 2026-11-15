@@ -42,28 +42,6 @@ function asNumber(value, fallback = 0) {
     return Number.isFinite(n) ? n : fallback;
 }
 
-// Classify a media file by its name + probed metadata. Shared by the auto
-// directory importer (AutoImporter) and the manual importer (TimelineEditor)
-// so the rules stay in sync.
-function classifyMedia(fileName, meta) {
-    const name = fileName || "";
-    const isImage = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(name);
-    const isAudioOnlyExt = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(name);
-    const hasAudioSuffix = /[-_]audio[-_]?\d*\.\w+$/i.test(name);
-    const hasVideoStream = (meta?.width || 0) > 0 && (meta?.height || 0) > 0;
-    const treatAsAudioOnly = !hasVideoStream || isAudioOnlyExt || hasAudioSuffix;
-    const hasAudio = meta?.has_audio || false;
-    return { isImage, isAudioOnlyExt, hasAudioSuffix, hasVideoStream, treatAsAudioOnly, hasAudio };
-}
-
-// Auto directory import gate: only videos that carry BOTH a video stream and
-// an audio track are auto-imported. Images, silent videos and standalone audio
-// files (mp3/wav/m4a BGM, ...) are all skipped on auto; manual import bypasses
-// this gate and accepts every supported type.
-function isAutoImportAllowed(cls) {
-    return cls.hasVideoStream && cls.hasAudio;
-}
-
 // ── CSS ──────────────────────────────────────────────────────────────
 const STYLES = `
 .bsai-pp-overlay {
@@ -1077,32 +1055,24 @@ class AutoImporter {
                 const metaResp = await api.fetchApi(`/bsai_premiere_pro/metadata?file=${encodeURIComponent(file.file_path)}`);
                 const meta = await metaResp.json();
                 if (meta.error) { console.warn("[BSAI PP]", meta.error); continue; }
-                const cls = classifyMedia(file.file_name, meta);
-                if (td.filter_audio_only && !cls.hasAudio) {
-                    td.known_files.push(file.file_name);
-                    skipped++;
-                    continue;
-                }
-                // Strict auto-import gate: images and silent videos are not
-                // auto-imported (manual pickers bypass this gate).
-                if (!isAutoImportAllowed(cls)) {
+                if (td.filter_audio_only && !meta.has_audio) {
                     td.known_files.push(file.file_name);
                     skipped++;
                     continue;
                 }
                 const vId = `clip_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
                 const aId = `clip_${Date.now() + 1}_${Math.random().toString(36).substr(2, 6)}`;
-                const isAudioOnly = cls.isAudioOnlyExt;
-                const hasAudioSuffix = cls.hasAudioSuffix;
-                const hasVideoStream = cls.hasVideoStream;
+                const isAudioOnly = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(file.file_name || "");
+                const hasAudioSuffix = /[-_]audio[-_]?\d*\.\w+$/i.test(file.file_name || "");
+                const hasVideoStream = (meta.width || 0) > 0 && (meta.height || 0) > 0;
                 // Treat as audio-only if:
                 //   1) It is an audio extension (.mp3/.wav/.aac/...)
                 //   2) Its filename ends with `-audio[-_]N.ext`
                 //   3) It has NO video stream at all (e.g. m4a-in-mp4 container, silent files, etc.)
                 // The third rule catches audio files saved with .mp4 extension where name-suffix regex fails.
-                const treatAsAudioOnly = cls.treatAsAudioOnly;
-                const isImage = cls.isImage;
-                const hasAudio = cls.hasAudio;
+                const treatAsAudioOnly = !hasVideoStream || isAudioOnly || hasAudioSuffix;
+                const isImage = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(file.file_name || "");
+                const hasAudio = meta.has_audio || false;
                 const clipDuration = isImage ? 5 : (meta.duration || 0);
                 const base = {
                     file_path: file.file_path, file_name: file.file_name,
@@ -5367,6 +5337,10 @@ class TimelineEditor {
         try {
             const resp = await api.fetchApi(`/bsai_premiere_pro/scan?directory=${encodeURIComponent(dir)}`);
             const data = await resp.json();
+            if (data.error) {
+                this._toast(`Scan failed: ${data.error}`, "error");
+                return;
+            }
             if (data.files && data.files.length > 0) {
                 const known = new Set(this.td.known_files || []);
                 const deleted = new Set(this.td.deleted_files || []);
@@ -5374,7 +5348,7 @@ class TimelineEditor {
                 if (newFiles.length > 0) {
                     let added = 0;
                     for (const file of newFiles) {
-                        const ok = await this._addClipFromFile(file, { auto: true });
+                        const ok = await this._addClipFromFile(file);
                         if (ok) added++;
                     }
                     this._autoLinkClips();
@@ -5382,9 +5356,9 @@ class TimelineEditor {
                     this._renderAll();
                     const skipped = newFiles.length - added;
                     if (added > 0) {
-                        this._toast(`Imported ${added} videos` + (skipped > 0 ? ` (skipped ${skipped} images / silent videos)` : ""), "success");
+                        this._toast(`Imported ${added} videos` + (skipped > 0 ? ` (skipped ${skipped} without audio)` : ""), "success");
                     } else if (skipped > 0) {
-                        this._toast(`All ${skipped} files are images or silent videos, skipped`, "info");
+                        this._toast(`All ${skipped} videos have no audio, skipped`, "info");
                     }
                 } else {
                     this._toast("No new video files found", "info");
@@ -5397,7 +5371,7 @@ class TimelineEditor {
         }
     }
 
-    async _addClipFromFile(file, opts = {}) {
+    async _addClipFromFile(file) {
         try {
             // Use metadata from upload response if available, otherwise fetch it
             let meta;
@@ -5409,22 +5383,13 @@ class TimelineEditor {
                 meta = await metaResp.json();
                 if (meta.error) { this._toast(meta.error, "error"); return false; }
             }
-            const cls = classifyMedia(file.file_name, meta);
-            const isImage = cls.isImage;
-            const isAudioOnly = cls.isAudioOnlyExt;
-            const hasAudioSuffix = cls.hasAudioSuffix;
-            const hasVideoStream = cls.hasVideoStream;
-            // Preserve this importer's original narrower audio-only rule.
+            const isImage = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(file.file_name || "");
+            const isAudioOnly = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(file.file_name || "");
+            const hasAudioSuffix = /[-_]audio[-_]?\d*\.\w+$/i.test(file.file_name || "");
+            const hasVideoStream = (meta.width || 0) > 0 && (meta.height || 0) > 0;
             const treatAsAudioOnly = (isAudioOnly || hasAudioSuffix) && !hasVideoStream;
             const duration = meta.duration || (isImage ? 5 : 0);
-            const hasAudio = cls.hasAudio;
-            // Strict gate for directory auto-import (poll / Scan button).
-            // Manual pickers call this without {auto: true} and keep all types.
-            if (opts.auto === true && !isAutoImportAllowed(cls)) {
-                if (!this.td.known_files) this.td.known_files = [];
-                if (!this.td.known_files.includes(file.file_name)) this.td.known_files.push(file.file_name);
-                return false;
-            }
+            const hasAudio = meta.has_audio || false;
             const vId = `clip_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
             const aId = `clip_${Date.now() + 1}_${Math.random().toString(36).substr(2, 6)}`;
             const base = {

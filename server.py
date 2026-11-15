@@ -31,6 +31,12 @@ async def scan_directory(request):
                 {"files": [], "error": "Path must be inside ComfyUI input/temp/output directories"},
                 status=400,
             )
+        if not os.path.isdir(confined):
+            return web.json_response(
+                {"files": [], "directory": directory,
+                 "error": "Directory not found: %s" % confined},
+                status=404,
+            )
         files = scan_video_directory(confined)
         return web.json_response({"files": files, "directory": directory})
     except Exception as e:
