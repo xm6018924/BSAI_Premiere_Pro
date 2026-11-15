@@ -2545,7 +2545,9 @@ class TimelineEditor {
     }
 
     async _openSourceDirectory() {
-        // Find the source directory from timeline clips
+        // Priority: directory of the first timeline clip, then the configured
+        // watch directory, then the ComfyUI output root. Previously an empty
+        // timeline bailed out here with a warning and never opened anything.
         const clips = this.td.clips || [];
         let sourcePath = null;
         for (const clip of clips) {
@@ -2563,23 +2565,43 @@ class TimelineEditor {
             }
         }
         if (!sourcePath) {
-            this._toast("No video files on the timeline", "warning");
-            return;
+            sourcePath = this._getWidgetValue("watch_directory", "output") || "output";
         }
-        try {
-            const resp = await api.fetchApi(`/bsai_premiere_pro/open_explorer?path=${encodeURIComponent(sourcePath)}`);
+
+        const _probe = async (p) => {
+            const resp = await api.fetchApi(`/bsai_premiere_pro/open_explorer?path=${encodeURIComponent(p)}`);
             const text = await resp.text();
-            if (!text) {
+            if (!text) return { empty: true };
+            let data;
+            try { data = JSON.parse(text); } catch { data = { error: text }; }
+            return data;
+        };
+
+        try {
+            let data = await _probe(sourcePath);
+            // Watch subdir not created yet, or path outside confinement: retry
+            // parent segments, then fall back to the output root.
+            if (data.error && /Not a directory|inside ComfyUI/i.test(data.error)) {
+                let parent = sourcePath;
+                for (let i = 0; i < 4; i++) {
+                    const idx = Math.max(parent.lastIndexOf("/"), parent.lastIndexOf("\\"));
+                    if (idx <= 0) break;
+                    parent = parent.substring(0, idx);
+                    data = await _probe(parent);
+                    if (!data.error) break;
+                }
+                if (data.error) data = await _probe("output");
+            }
+            if (data.empty) {
                 this._toast("Server is not responding, restart ComfyUI and retry", "warning");
                 return;
             }
-            let data;
-            try { data = JSON.parse(text); } catch { data = { error: text }; }
             if (data.error) {
                 this._toast(`Cannot open directory: ${data.error}`, "error");
-            } else {
-                this._toast(`Opened source directory: ${sourcePath}`, "success");
+                return;
             }
+            const label = data.path || sourcePath;
+            this._toast(data.note ? `${data.note}: ${label}` : `Opened source directory: ${label}`, "success");
         } catch (e) {
             this._toast(`Failed to open directory: ${e.message || e}`, "error");
         }

@@ -152,6 +152,22 @@ A powerful ComfyUI custom node offering professional timeline video editing: aut
 
 **快捷键速查 / Hotkeys**: `Space` 播放/暂停 · `S` 剪刀 · `Del` 删除 · `Ctrl+Z/Y` 撤销/重做 · `Ctrl+A` 全选 · `Ctrl+拖拽` 复制片段 · `Alt+拖拽` 仅移动视频或音频
 
+### 两种模式互斥（自动判定，不需要手动切换）
+
+| | 触发条件 | 监控目录导入 | 时间线内容 |
+| --- | --- | --- | --- |
+| **⚡Input 输入模式** | `image` 或 `audio` 端口**任一**接到数据 | **屏蔽**（前端 `AutoImporter` 停止扫描，手动点扫描也拦下） | 只保留本节点产出的片段（`bsai_merged_*`、`clip_videos`、`origin=node`），监控目录扫进来的片段在合并前被逐条剔除并打印文件名 |
+| **✋Watch 手动模式** | 两个端口都没接 | 照旧（`auto_import` 打开时后台每 `POLL_INTERVAL` 扫一次，点「Scan」立即扫） | 监控目录里的视频全部导入，按片段编辑 |
+
+节点标题会显示当前模式：`[⚡Input]` / `[✋Watch]`。
+
+### 不重复超分（Idempotent upscale）
+
+- 插件把每次超分产物登记进 `output/.bsai_upscaled_registry.json`（文件名 + 字节数 + 尺寸 + 倍率），中间件 `premiere_pro_upscaled_*.mp4` 与成片都会登记；
+- 只要时间线里**有任意片段已经是超分产物**（登记表命中，或文件名带 `upscaled` / `_4K` / `_x2` / `_x4`），本次就整体跳过超分，日志打印 `⏭ 检测到已超分过的片段，本次跳过超分`；
+- `upscale_video_file()` 入口也做了同样判断：单个文件被再次送进超分时直接原样返回，不会 4K→8K 二次放大。
+
+
 ---
 
 ## 常见问题 / FAQ

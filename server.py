@@ -691,8 +691,30 @@ async def open_explorer(request):
                 {"error": "Path must be inside ComfyUI input/temp/output directories"},
                 status=400,
             )
+        note = None
         if not os.path.isdir(confined):
-            return web.json_response({"error": f"Not a directory: {confined}"}, status=404)
+            # Requested subdir does not exist yet (e.g. a watch folder that was
+            # never created). Walk up to the nearest existing ancestor that is
+            # still inside a ComfyUI base dir, so the button still opens a
+            # usable folder instead of failing with 404.
+            probe = confined
+            fallback = None
+            while True:
+                parent = os.path.dirname(probe)
+                if parent == probe:
+                    break
+                parent_confined = _confine_comfy_path(parent)
+                if not parent_confined:
+                    break
+                if os.path.isdir(parent_confined):
+                    fallback = parent_confined
+                    break
+                probe = parent
+            if fallback:
+                note = "Requested directory does not exist; opened its parent folder"
+                confined = fallback
+            else:
+                return web.json_response({"error": f"Not a directory: {confined}"}, status=404)
         # A one-click "open the folder" only for a caller on this machine; any
         # other client (LAN, port-forwarded browser) just gets the path back,
         # so a remote request cannot pop a window on the host desktop.
@@ -711,6 +733,9 @@ async def open_explorer(request):
                 opened = True
             except Exception as open_err:
                 print(f"[BSAI Premiere Pro] 打开文件夹失败: {open_err}")
-        return web.json_response({"success": True, "path": confined, "opened": opened})
+        payload = {"success": True, "path": confined, "opened": opened}
+        if note:
+            payload["note"] = note
+        return web.json_response(payload)
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
