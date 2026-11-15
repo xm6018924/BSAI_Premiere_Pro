@@ -10,7 +10,7 @@ A powerful ComfyUI custom node offering professional timeline video editing: aut
 
 ## 功能特性 / Features
 
-- **自动导入 / Auto-import**：监视目录，新视频自动进时间轴
+- **自动导入 / Auto-import**：监视目录，仅同时含画面与音频的视频自动进时间轴；图片、无声视频、独立音频（mp3/wav/m4a 等）均不自动导入（手动导入仍支持视频/音频/图片全部类型）
 - **剪辑裁剪 / Trim & split**：拖拽裁剪、剪刀工具、框选批量操作
 - **转场特效 / Transitions**：切镜 / 淡入淡出 / 黑屏 / 白屏
 - **音视频关联 / A/V linking**：音画联动剪辑，支持替换音频
@@ -36,7 +36,7 @@ A powerful ComfyUI custom node offering professional timeline video editing: aut
 | 参数 / Parameter | 类型 | 默认值 / Default | 说明 / Description |
 |---|---|---|---|
 | `watch_directory` | 字符串 | `.\ComfyUI\output` | 监视目录路径，自动扫描该目录下的视频文件 / Watch directory for auto-import |
-| `auto_import` | 布尔值 | `True` | 自动导入监视目录中的新视频文件 / Auto-import new videos |
+| `auto_import` | 布尔值 | `True` | 自动导入监视目录中的新文件；仅同时含画面与音频的视频入库，图片、无声视频、独立音频跳过（手动 Import Files 不受此限制）/ Auto-import: only videos with both video stream and audio; images, silent videos & standalone audio skipped on auto, manual import accepts all |
 | `auto_merge` | 布尔值 | `False` | 节点 Run 时是否自动把时间线片段合并成成片。关（默认）：只收集/刷新片段，需在编辑器点「Render Output」手动合并；开：节点执行时自动合并 / Auto-merge timeline clips on Run; off = merge manually via Render Output |
 | `default_transition` | 下拉 | `cut` | 默认转场：切镜/淡入淡出/黑屏过渡/白屏过渡 / cut/fade/black/white |
 | `transition_duration` | 浮点数 | `0.5` | 转场时长（秒），范围 0.0-5.0 / Transition duration (s) |
@@ -158,7 +158,7 @@ A powerful ComfyUI custom node offering professional timeline video editing: aut
 | | 触发条件 | 监控目录导入 | 时间线内容 |
 | --- | --- | --- | --- |
 | **⚡Input 输入模式** | `image` 或 `audio` 端口**任一**接到数据 | **屏蔽**（前端 `AutoImporter` 停止扫描，手动点扫描也拦下） | 只保留本节点产出的片段（`bsai_merged_*`、`clip_videos`、`origin=node`），监控目录扫进来的片段在合并前被逐条剔除并打印文件名 |
-| **✋Watch 手动模式** | 两个端口都没接 | 照旧（`auto_import` 打开时后台每 `POLL_INTERVAL` 扫一次，点「Scan」立即扫） | 监控目录里的视频全部导入，按片段编辑 |
+| **✋Watch 手动模式** | 两个端口都没接 | 照旧（`auto_import` 打开时后台每 `POLL_INTERVAL` 扫一次，点「Scan」立即扫） | 目录自动导入仅收同时含画面与音频的视频，图片/无声视频/独立音频跳过；用「Import Files / 浏览目录 / 勾选导入」手动添加时，视频、音频、图片全部支持 |
 
 节点标题会显示当前模式：`[⚡Input]` / `[✋Watch]`。
 
