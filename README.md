@@ -37,6 +37,7 @@ A powerful ComfyUI custom node offering professional timeline video editing: aut
 |---|---|---|---|
 | `watch_directory` | 字符串 | `.\ComfyUI\output` | 监视目录路径，自动扫描该目录下的视频文件 / Watch directory for auto-import |
 | `auto_import` | 布尔值 | `True` | 自动导入监视目录中的新视频文件 / Auto-import new videos |
+| `auto_merge` | 布尔值 | `False` | 节点 Run 时是否自动把时间线片段合并成成片。关（默认）：只收集/刷新片段，需在编辑器点「Render Output」手动合并；开：节点执行时自动合并 / Auto-merge timeline clips on Run; off = merge manually via Render Output |
 | `default_transition` | 下拉 | `cut` | 默认转场：切镜/淡入淡出/黑屏过渡/白屏过渡 / cut/fade/black/white |
 | `transition_duration` | 浮点数 | `0.5` | 转场时长（秒），范围 0.0-5.0 / Transition duration (s) |
 | `output_filename` | 字符串 | `premiere_pro_output` | 输出文件名（不含扩展名）/ Output filename |

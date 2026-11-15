@@ -1687,6 +1687,7 @@ class TimelineEditor {
                     <button class="bsai-pp-btn" data-act="add-atrack">＋ Audio Track</button>
                     <button class="bsai-pp-btn bsai-pp-btn-danger" data-act="clear-all">🗑 Clear All</button>
                     <button class="bsai-pp-btn" data-act="batch-select" id="bsai-pp-batch-btn">☑ Batch Select</button>
+                    <button class="bsai-pp-btn" data-act="merge-toggle" id="bsai-pp-merge-btn" title="Auto-merge: when on, node Run merges timeline clips into one video; off (default) = collect clips only, merge manually via Render Output">🔗 Auto Merge: Off</button>
                     <button class="bsai-pp-btn" data-act="upscale-toggle" id="bsai-pp-upscale-btn" title="4K upscale HD repair master switch: when on, AI-upscales the video track before render output">🎞️ 4K Upscale: Off</button>
                     <label>Align</label>
                     <select class="bsai-pp-align-select" data-act="align-mode" title="Portrait/landscape alignment">
@@ -2134,6 +2135,7 @@ class TimelineEditor {
         this.modal.querySelector('[data-act="add-atrack"]').onclick = () => this._addAudioTrack();
         this.modal.querySelector('[data-act="clear-all"]').onclick = () => this._clearAllClips();
         this.modal.querySelector('[data-act="batch-select"]').onclick = () => this._toggleBatchMode();
+        this.modal.querySelector('[data-act="merge-toggle"]').onclick = () => this._toggleMerge();
         this.modal.querySelector('[data-act="upscale-toggle"]').onclick = () => this._toggleUpscale();
         this.modal.querySelector('[data-act="render"]').onclick = () => this._renderVideo();
     }
@@ -2143,6 +2145,7 @@ class TimelineEditor {
         this._renderEditPanel();
         this._renderFooter();
         this._updateUpscaleBtn();
+        this._updateMergeBtn();
         this._loadThumbnails();
     }
 
@@ -4004,6 +4007,25 @@ class TimelineEditor {
         btn.style.color = enabled ? "#a5d6a7" : "#ddd";
     }
 
+    _toggleMerge() {
+        const cur = this._getWidgetValue("auto_merge", false);
+        this._setWidgetValue("auto_merge", !cur);
+        this._updateMergeBtn();
+        this._renderEditPanel();
+        this._save();
+        this._toast(!cur ? "Auto-merge enabled (node Run merges automatically)" : "Auto-merge disabled (merge manually via Render Output)", !cur ? "success" : "info");
+    }
+
+    _updateMergeBtn() {
+        const btn = this.modal.querySelector("#bsai-pp-merge-btn");
+        if (!btn) return;
+        const enabled = this._getWidgetValue("auto_merge", false);
+        btn.textContent = enabled ? "🔗 Auto Merge: On" : "🔗 Auto Merge: Off";
+        btn.style.background = enabled ? "#1b5e20" : "#3a3a3a";
+        btn.style.borderColor = enabled ? "#4caf50" : "#555";
+        btn.style.color = enabled ? "#a5d6a7" : "#ddd";
+    }
+
     _renderBatchBar() {
         if (!this.batchMode) return;
         let bar = this.modal.querySelector("#bsai-pp-batch-bar");
@@ -4856,6 +4878,10 @@ class TimelineEditor {
                     <span style="color:#4caf50;font-size:13px;font-weight:600;">${formatTime(totalDur)}</span>
                 </div>
                 <div class="bsai-pp-edit-row" style="margin-top:6px;padding-top:6px;border-top:1px dashed #3a3a3a;flex-wrap:wrap;">
+                    <label style="color:#e0b050;font-weight:700;">Merge</label>
+                    <label style="display:flex;align-items:center;gap:4px;"><input type="checkbox" data-global="auto_merge" ${this._getWidgetValue("auto_merge", false) ? "checked" : ""}> Auto-merge on Run</label>
+                </div>
+                <div class="bsai-pp-edit-row" style="flex-wrap:wrap;">
                     <label style="color:#e0b050;font-weight:700;">4K Upscale HD Repair</label>
                     <label style="display:flex;align-items:center;gap:4px;"><input type="checkbox" data-global="upscale_enable" ${effectiveUpscaleEnable ? "checked" : ""}> Enable</label>
                 </div>
@@ -4895,6 +4921,7 @@ class TimelineEditor {
                     if (w) w.value = val;
                     this.td[field] = val;
                     this._save();
+                    if (field === "auto_merge") this._updateMergeBtn();
                     if (field === "default_transition" || field === "transition_duration") {
                         this._renderTimeline();
                     }

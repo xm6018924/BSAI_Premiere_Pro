@@ -81,6 +81,10 @@ class BSAIPremiereProTimeline:
                     "default": "Off",
                     "tooltip": "Face repair: enable when H3 far-shot small faces look blurry",
                 }),
+                "auto_merge": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Auto-merge timeline clips into one video on node Run. Off (default): collect/update clips only, merge manually from the editor's Render Output button. On: merge automatically when the node executes.",
+                }),
             },
             "optional": {
                 "image": ("IMAGE",),
@@ -121,7 +125,7 @@ class BSAIPremiereProTimeline:
                pix_fmt, crf, frame_rate,
                upscale_enable=False, upscale_model="realesr-general-x4v3.pth",
                upscale_scale=4.0, upscale_tile_size=0, upscale_batch=4,
-               upscale_detail=0.5, upscale_face="Off",
+               upscale_detail=0.5, upscale_face="Off", auto_merge=False,
                image=None, audio=None, clip_videos=None, unique_id=None):
         # 旧版中文标签归一化到英文标签（语义/参数完全一致）
         if upscale_face == "小脸增强(CodeFormer)":
@@ -342,6 +346,20 @@ class BSAIPremiereProTimeline:
             ui = {"error": ["No enabled clips"]}
             if timeline_updated:
                 ui["timeline_data"] = [json.dumps(data)]
+            return {"result": ("",), "ui": ui}
+
+        # ── Auto-merge gate ──
+        # Off (default): the node only collects / refreshes clips on the
+        # timeline and stores them; no final merged video is produced here.
+        # The user merges on demand from the editor's "Render Output" button
+        # (POST /render), which always merges regardless of this switch.
+        # On: proceed to upscale + process_and_merge automatically below.
+        if not auto_merge:
+            _timeline_store[unique_id] = json.dumps(data)
+            ui = {
+                "timeline_data": [json.dumps(data)],
+                "merge_msg": ["Auto-merge off: timeline updated; click Render Output to merge manually"],
+            }
             return {"result": ("",), "ui": ui}
 
         upscale_params = None
