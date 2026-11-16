@@ -887,6 +887,12 @@ def _process_track_clips(clips, track_type, track_index, temp_dir, target_w, tar
                 print(f"[BSAI Premiere Pro] 🎞️ Clip-level 4K超分: {clip.get('file_name', 'unknown')} (模型: {clip_model})")
             else:
                 print(f"[BSAI Premiere Pro] 🎞️ Clip-level 4K超分: {clip.get('file_name', 'unknown')} (使用全局模型)")
+            clip_scale = clip.get('upscale_scale', None)
+            if clip_scale not in (None, "", 0, 0.0):
+                try:
+                    clip_upscale_params['scale'] = float(clip_scale)
+                except (TypeError, ValueError):
+                    pass
             up_file = upscale_video_file(output_file, clip_upscale_params, target_fps, temp_dir)
             if up_file and os.path.exists(up_file):
                 output_file = up_file
@@ -1336,6 +1342,12 @@ def _process_legacy(enabled_clips, temp_dir, output_path,
                 print(f"[BSAI Premiere Pro] 🎞️ Clip-level 4K超分: {clip.get('file_name', 'unknown')} (模型: {clip_model})")
             else:
                 print(f"[BSAI Premiere Pro] 🎞️ Clip-level 4K超分: {clip.get('file_name', 'unknown')} (使用全局模型)")
+            clip_scale = clip.get('upscale_scale', None)
+            if clip_scale not in (None, "", 0, 0.0):
+                try:
+                    clip_upscale_params['scale'] = float(clip_scale)
+                except (TypeError, ValueError):
+                    pass
             up_file = upscale_video_file(output_file, clip_upscale_params, target_fps, temp_dir)
             if up_file and os.path.exists(up_file):
                 output_file = up_file

@@ -1140,6 +1140,7 @@ class AutoImporter {
                     transition_in: "cut", transition_out: "cut", transition_duration: 0.5,
                     audio_replacement: null, audio_fade_in: 0, audio_fade_out: 0,
                     video_enabled: true, audio_enabled: true,
+                    upscale_enable: false, upscale_model: "", upscale_scale: "",
                 };
                 if (treatAsAudioOnly) {
                     // Find the audio track with the latest end time across all tracks
@@ -1712,6 +1713,73 @@ class TimelineEditor {
     _setWidgetValue(name, value) {
         const w = this._getWidget(name);
         if (w) w.value = value;
+    }
+
+    // --- Upscale engine <-> second-level multiplier options -----------------
+    // Mirrors the engine labels / native multipliers in BSAI-H3-upscale-4K.
+    // The first-level dropdown is the engine/model; the second-level dropdown
+    // is the upscale multiplier (2X / 3X / 4X ...) valid for that engine.
+    _ppUpscaleEngineId(modelName) {
+        const m = String(modelName || "").trim();
+        if (!m) return "";
+        const low = m.toLowerCase();
+        if (low.includes("relayvsr") || low.includes("refvsr")) return "relayvsr";
+        if (low.includes("flashvsr")) return "flashvsr";
+        if (low.includes("seedvr2") && (low.includes("int8") || low.includes("native"))) return "seedvr2_int8";
+        if (low.includes("seedvr2")) return "seedvr2";
+        if (low.includes("vosr") && low.includes("dlss")) return "vosr_dlss";
+        if (low.includes("vosr") && low.includes("rtx")) return "vosr_rtx";
+        if (low.includes("vosr")) return "vosr2";
+        if (low.includes("rtx vfx") || low.includes("vfx")) return "rtx_vfx";
+        if (low.includes("rtx")) return "rtx";
+        if (low.includes("dlss")) return "dlss5";
+        if (low.includes("topaz") || low.includes("starlight") || low.includes("astra") || low.includes("wonder")) return "topaz";
+        if (low.includes("auto route") || low.includes("auto_route")) return "auto";
+        if (low.endsWith(".pth")) return "realesr";
+        return "generic";
+    }
+
+    _ppUpscaleScaleOptions(engineId) {
+        // value = numeric multiplier stored in upscale_scale; label shown in the menu.
+        switch (engineId) {
+            case "relayvsr":
+            case "flashvsr":
+            case "seedvr2":
+            case "seedvr2_int8":
+            case "rtx":
+            case "vosr2":
+            case "realesr":
+                return [{ value: 2, label: "2X" }, { value: 4, label: "4X" }];
+            case "rtx_vfx":
+                return [{ value: 1, label: "1X (clean only)" }, { value: 2, label: "2X" }, { value: 4, label: "4X" }];
+            case "vosr_dlss":
+            case "vosr_rtx":
+                return [{ value: 4, label: "4X (2×2 chain)" }];
+            case "topaz":
+            case "dlss5":
+            case "auto":
+            case "generic":
+            default:
+                return [{ value: 2, label: "2X" }, { value: 3, label: "3X" }, { value: 4, label: "4X" }];
+        }
+    }
+
+    _ppUpscaleScaleSelectHtml(engineId, currentScale, opts) {
+        const allowGlobal = !!(opts && opts.allowGlobal);
+        const cur = (currentScale === "" || currentScale == null) ? "" : Number(currentScale);
+        const options = this._ppUpscaleScaleOptions(engineId);
+        let html = "";
+        if (allowGlobal) html += `<option value="" ${cur === "" ? "selected" : ""}>(Use Global Scale)</option>`;
+        const listed = options.some(o => cur !== "" && Math.abs(Number(cur) - o.value) < 1e-6);
+        for (const o of options) {
+            const sel = (cur !== "" && Math.abs(Number(cur) - o.value) < 1e-6) ? "selected" : "";
+            html += `<option value="${o.value}" ${sel}>${o.label}</option>`;
+        }
+        // Preserve a non-listed legacy/custom ratio (e.g. 2.67) so a saved workflow never drops it.
+        if (cur !== "" && !listed) {
+            html += `<option value="${escapeHtml(cur)}" selected>${escapeHtml(cur)}X (custom)</option>`;
+        }
+        return html;
     }
 
     open() {
@@ -4898,6 +4966,8 @@ class TimelineEditor {
             const _umW = this._getWidget("upscale_model");
             const _umOpts = (_umW?.options?.values && _umW.options.values.length) ? _umW.options.values : [upscaleModel];
             const upscaleModelOptions = _umOpts.map(m => `<option value="${escapeHtml(m)}" ${m === upscaleModel ? "selected" : ""}>${escapeHtml(m)}</option>`).join("");
+            const _globalEng = this._ppUpscaleEngineId(upscaleModel);
+            const globalScaleOptions = this._ppUpscaleScaleSelectHtml(_globalEng, upscaleScale, {});
             // English options only. Old workflows that saved the former Chinese
             // label are still accepted by the node's VALIDATE_INPUTS on load.
             const _faceOpts = ["Off", "GFPGANv1.4", "CodeFormer", "SmallFace Enhance (CodeFormer)"];
@@ -4933,9 +5003,10 @@ class TimelineEditor {
                 </div>
                 <div class="bsai-pp-edit-row" style="flex-wrap:wrap;">
                     <label>Upscale Model</label>
-                    <select data-global="upscale_model" style="flex:1;min-width:170px;max-width:250px;">${upscaleModelOptions}</select>
+                    <select data-global="upscale_model" id="bsai-pp-global-model" style="flex:1;min-width:170px;max-width:250px;">${upscaleModelOptions}</select>
                     <label>Scale</label>
-                    <input type="number" min="1" max="8" step="0.01" value="${upscaleScale}" data-global="upscale_scale" style="width:68px;" title="4 = 4K level">
+                    <select data-global="upscale_scale" id="bsai-pp-global-scale" style="width:110px;" title="Second-level multiplier for the selected engine">${globalScaleOptions}</select>
+                    <input type="number" min="1" max="8" step="0.01" value="${upscaleScale}" data-global="upscale_scale" id="bsai-pp-global-scale-num" style="width:62px;" title="Custom ratio; overrides the dropdown when edited. 4 = 4K level">
                 </div>
                 <div class="bsai-pp-edit-row" style="flex-wrap:wrap;">
                     <label>Tile</label>
@@ -4963,6 +5034,7 @@ class TimelineEditor {
                     if (input.type === "checkbox") val = input.checked;
                     else if (input.type === "number") val = parseFloat(input.value) || 0;
                     else val = input.value;
+                    if (field === "upscale_scale") val = parseFloat(val) || 0;
                     const w = this._getWidget(field);
                     if (w) w.value = val;
                     this.td[field] = val;
@@ -4975,6 +5047,38 @@ class TimelineEditor {
                 input.onchange = handler;
                 if (input.type === "range") input.oninput = handler;
             });
+            // Global engine <-> second-level multiplier linkage: changing the
+            // engine rebuilds the valid multiplier options; the dropdown and
+            // the custom number input stay in sync.
+            const gModelSel = panel.querySelector("#bsai-pp-global-model");
+            const gScaleSel = panel.querySelector("#bsai-pp-global-scale");
+            const gScaleNum = panel.querySelector("#bsai-pp-global-scale-num");
+            const _syncGlobalScaleNum = () => { if (gScaleSel && gScaleNum) gScaleNum.value = gScaleSel.value; };
+            const _rebuildGlobalScale = () => {
+                if (!gModelSel || !gScaleSel) return;
+                const eng = this._ppUpscaleEngineId(gModelSel.value);
+                gScaleSel.innerHTML = this._ppUpscaleScaleSelectHtml(eng, gScaleSel.value, {});
+                _syncGlobalScaleNum();
+            };
+            if (gModelSel) {
+                const orig = gModelSel.onchange;
+                gModelSel.onchange = () => { if (orig) orig(); _rebuildGlobalScale(); };
+            }
+            if (gScaleSel) {
+                const orig = gScaleSel.onchange;
+                gScaleSel.onchange = () => { if (orig) orig(); _syncGlobalScaleNum(); };
+            }
+            if (gScaleNum) {
+                const orig = gScaleNum.onchange;
+                gScaleNum.onchange = () => {
+                    if (orig) orig();
+                    if (gScaleSel) {
+                        const v = parseFloat(gScaleNum.value);
+                        const match = [...gScaleSel.options].find(o => Math.abs(parseFloat(o.value) - v) < 1e-6);
+                        if (match) gScaleSel.value = match.value;
+                    }
+                };
+            }
             // Attach action button handlers
             const scanBtn = panel.querySelector('[data-act="scan"]');
             if (scanBtn) scanBtn.onclick = () => this._scanNow();
@@ -5039,6 +5143,10 @@ class TimelineEditor {
         if (isVideo) {
             const posX = asNumber(clip.pos_x);
             const posY = asNumber(clip.pos_y);
+            const clipUpscaleModel = clip.upscale_model || "";
+            const clipUpscaleScale = (clip.upscale_scale === "" || clip.upscale_scale == null) ? "" : clip.upscale_scale;
+            const _clipEng = this._ppUpscaleEngineId(clipUpscaleModel) || this._ppUpscaleEngineId(this._getWidgetValue("upscale_model", ""));
+            const clipScaleOptions = this._ppUpscaleScaleSelectHtml(_clipEng, clipUpscaleScale, { allowGlobal: true });
             html += `
             <div class="bsai-pp-edit-row">
                 <label>In Transition</label>
@@ -5058,10 +5166,12 @@ class TimelineEditor {
                 <label style="color:#e0b050;font-weight:600;">🎞️ 4K Upscale</label>
                 <input type="checkbox" data-field="upscale_enable" ${clip.upscale_enable === true ? "checked" : ""} title="When on, AI-upscales this clip individually at render time">
                 <label style="color:#e0b050;font-size:11px;">Model</label>
-                <select data-field="upscale_model" style="flex:1;min-width:120px;max-width:200px;font-size:11px;" title="Upscale model for this clip; empty = use global setting">
+                <select data-field="upscale_model" id="bsai-pp-clip-model" style="flex:1;min-width:120px;max-width:200px;font-size:11px;" title="Upscale model for this clip; empty = use global setting">
                     <option value="">(Use Global Model)</option>
                     ${(this._getWidget("upscale_model")?.options?.values || ["realesr-general-x4v3.pth","RealESRGAN_x4plus.pth","RealESRGAN_x4plus_anime_6B.pth"]).map(m => `<option value="${escapeHtml(m)}" ${clip.upscale_model === m ? "selected" : ""}>${escapeHtml(m)}</option>`).join("")}
                 </select>
+                <label style="color:#e0b050;font-size:11px;">Scale</label>
+                <select data-field="upscale_scale" id="bsai-pp-clip-scale" style="width:128px;font-size:11px;" title="Second-level multiplier for this clip; (Use Global Scale) inherits the global setting">${clipScaleOptions}</select>
                 <label>Position</label>
                 <span style="color:#888;font-size:11px;">X</span>
                 <input type="range" class="bsai-pp-pos-slider" min="-100" max="100" step="1" value="${posX}" data-field="pos_x">
@@ -5115,6 +5225,7 @@ class TimelineEditor {
                 if (input.type === "checkbox") val = input.checked;
                 else if (input.type === "number" || input.type === "range") val = parseFloat(input.value) || 0;
                 else if (field === "track_index") val = parseInt(input.value) || 0;
+                else if (field === "upscale_scale") val = input.value === "" ? "" : (parseFloat(input.value) || 0);
                 else val = input.value;
                 if (field === "track_index" && clip.track_index !== val) {
                     const clipIdx = this.td.clips.indexOf(clip);
@@ -5138,6 +5249,26 @@ class TimelineEditor {
             input.onchange = handler;
             if (input.type === "range") input.oninput = handler;
         });
+
+        // Clip-level engine <-> second-level multiplier linkage: picking another
+        // model rebuilds the valid multiplier options for that engine.
+        const clipModelSel = panel.querySelector("#bsai-pp-clip-model");
+        const clipScaleSel = panel.querySelector("#bsai-pp-clip-scale");
+        if (clipModelSel && clipScaleSel) {
+            const origModel = clipModelSel.onchange;
+            clipModelSel.onchange = () => {
+                if (origModel) origModel();
+                const eng = this._ppUpscaleEngineId(clipModelSel.value)
+                    || this._ppUpscaleEngineId(this._getWidgetValue("upscale_model", ""));
+                const opts = this._ppUpscaleScaleOptions(eng);
+                let cur = clipScaleSel.value;
+                const curNum = cur === "" ? "" : Number(cur);
+                const stillValid = cur !== "" && opts.some(o => Math.abs(Number(curNum) - o.value) < 1e-6);
+                // Drop a multiplier that the newly selected engine does not offer.
+                const nextVal = stillValid ? cur : "";
+                clipScaleSel.innerHTML = this._ppUpscaleScaleSelectHtml(eng, nextVal, { allowGlobal: true });
+            };
+        }
 
         const linkBadges = panel.querySelectorAll('[data-act="toggle-link"]');
         linkBadges.forEach(btn => btn.onclick = () => this._toggleLink(clip));
@@ -5461,6 +5592,7 @@ class TimelineEditor {
                 transition_duration: parseFloat(this._getWidgetValue("transition_duration", 0.5)),
                 audio_replacement: null, audio_fade_in: 0, audio_fade_out: 0,
                 video_enabled: true, audio_enabled: true,
+                upscale_enable: false, upscale_model: "", upscale_scale: "",
             };
             if (treatAsAudioOnly) {
                 // Pure audio or -audio suffix file: place at end of last audio clip across all tracks
