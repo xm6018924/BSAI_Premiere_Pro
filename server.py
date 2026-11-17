@@ -8,7 +8,7 @@ from aiohttp import web
 
 from .utils import (
     scan_video_directory, scan_audio_files,
-    get_video_info, generate_thumbnail, generate_waveform,
+    get_video_info, probe_video_info_batch, generate_thumbnail, generate_waveform,
     generate_filmstrip,
     process_and_merge, format_time,
     _resolve_directory, _confine_comfy_path, _to_relative_watch,
@@ -46,15 +46,51 @@ async def scan_directory(request):
 
 @PromptServer.instance.routes.get("/bsai_premiere_pro/metadata")
 async def get_metadata(request):
+    import asyncio
     file_path = request.query.get("file", "")
     file_path = urllib.parse.unquote(file_path)
     file_path = _confine_comfy_path(file_path)
     if not file_path or not os.path.exists(file_path):
         return web.json_response({"error": "File not found"}, status=404)
-    info = get_video_info(file_path)
+    info = await asyncio.to_thread(get_video_info, file_path)
     if info is None:
         return web.json_response({"error": "Failed to get video info"}, status=500)
     return web.json_response(info)
+
+
+@PromptServer.instance.routes.post("/bsai_premiere_pro/metadata_batch")
+async def get_metadata_batch(request):
+    """Probe many media files in one request with bounded concurrency.
+
+    Body: {"files": [absolute_path, ...]} → {"metadata": {path: info|null}}.
+    """
+    import asyncio
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    raw_paths = body.get("files") or []
+    if not isinstance(raw_paths, list):
+        return web.json_response({"error": "files must be a list"}, status=400)
+    pairs = []  # (original_path, confined_path)
+    for raw in raw_paths:
+        raw_str = str(raw or "")
+        p = urllib.parse.unquote(raw_str)
+        p = _confine_comfy_path(p)
+        if p and os.path.exists(p):
+            pairs.append((raw_str, p))
+    if not pairs:
+        return web.json_response({"metadata": {}})
+    confined_paths = [p for _, p in pairs]
+    metadata = await asyncio.to_thread(probe_video_info_batch, confined_paths, 4)
+    out = {}
+    for raw_str, confined in pairs:
+        info = metadata.get(confined)
+        out[confined] = info
+        # Alias the caller-supplied spelling so frontend lookups match either form.
+        if raw_str and raw_str != confined:
+            out[raw_str] = info
+    return web.json_response({"metadata": out})
 
 
 @PromptServer.instance.routes.get("/bsai_premiere_pro/thumbnail")
@@ -539,6 +575,7 @@ async def add_clip(request):
         import json as _json
         import os as _os
         import time as _time
+        import asyncio
         body = await request.json()
         node_id = str(body.get("node_id", ""))
         file_path = str(body.get("file_path", ""))
@@ -566,32 +603,13 @@ async def add_clip(request):
         if file_name in td["known_files"] or any(c.get("file_name") == file_name for c in td["clips"]):
             return web.json_response({"ok": True, "skipped": "duplicate"})
 
-        # Probe metadata with ffprobe if available
+        # Probe metadata off the event loop (cached in utils)
         dur, w, h, fps = 0.0, 1920, 1080, 24.0
-        try:
-            import subprocess as _sp
-            _ffprobe = None
-            for _cand in ["ffprobe"]:
-                from shutil import which as _which
-                _ffprobe = _which(_cand)
-                if _ffprobe:
-                    break
-            if _ffprobe:
-                _r = _sp.run([_ffprobe, "-v", "error", "-select_streams", "v:0",
-                               "-show_entries", "stream=width,height,r_frame_rate:format=duration",
-                               "-of", "json", file_path], capture_output=True, text=True, timeout=10)
-                _meta = _json.loads(_r.stdout)
-                if _meta.get("streams"):
-                    w = int(_meta["streams"][0].get("width", 1920))
-                    h = int(_meta["streams"][0].get("height", 1080))
-                    _rfr = _meta["streams"][0].get("r_frame_rate", "24/1")
-                    if "/" in _rfr:
-                        _n, _d = _rfr.split("/")
-                        fps = float(_n) / float(_d) if float(_d) > 0 else 24.0
-                if _meta.get("format"):
-                    dur = float(_meta["format"].get("duration", 0))
-        except Exception:
-            pass
+        info = await asyncio.to_thread(get_video_info, file_path) or {}
+        dur = info.get("duration", 0.0) or 0.0
+        w = info.get("width", 1920) or 1920
+        h = info.get("height", 1080) or 1080
+        fps = info.get("fps", 24.0) or 24.0
 
         _ts = int(_time.time() * 1000)
         _vId = f"h3clip_{_ts}_{node_id}"
@@ -644,6 +662,9 @@ async def upload_file(request):
 
     reader = await request.multipart()
     results = []
+    pending = []  # audio/video descriptors awaiting concurrent ffprobe
+    image_exts = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tiff", ".tif"}
+    audio_exts = {".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".wma", ".opus"}
     while True:
         part = await reader.next()
         if part is None:
@@ -659,26 +680,23 @@ async def upload_file(request):
             continue
         save_path = os.path.join(output_dir, filename)
         # Handle duplicate names
-        base, ext = os.path.splitext(filename)
+        base, ext2 = os.path.splitext(filename)
         counter = 1
         while os.path.exists(save_path):
-            save_path = os.path.join(output_dir, f"{base}_{counter}{ext}")
+            save_path = os.path.join(output_dir, f"{base}_{counter}{ext2}")
             counter += 1
-        # Save file in chunks
+        # Save file in large chunks (64 KB) to cut disk round-trips
         try:
             with open(save_path, "wb") as f:
                 while True:
-                    chunk = await part.read_chunk(8192)
+                    chunk = await part.read_chunk(65536)
                     if not chunk:
                         break
                     f.write(chunk)
         except Exception as e:
             results.append({"file_name": filename, "error": str(e)})
             continue
-        # Get metadata based on file type
-        ext = os.path.splitext(filename)[1].lower()
-        image_exts = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tiff", ".tif"}
-        audio_exts = {".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".wma", ".opus"}
+        size = os.path.getsize(save_path)
         if ext in image_exts:
             # Image file: get dimensions via PIL, no audio, no duration
             try:
@@ -690,31 +708,38 @@ async def upload_file(request):
                 w, h = 0, 0
             results.append({
                 "file_path": save_path, "file_name": os.path.basename(save_path),
-                "size": os.path.getsize(save_path), "duration": 0,
+                "size": size, "duration": 0,
                 "width": w, "height": h, "fps": 30, "has_audio": False,
             })
-        elif ext in audio_exts:
-            # Audio file: get duration via ffprobe, no video dimensions
-            info = await asyncio.to_thread(get_video_info, save_path)
-            results.append({
-                "file_path": save_path, "file_name": os.path.basename(save_path),
-                "size": os.path.getsize(save_path),
-                "duration": (info or {}).get("duration", 0),
-                "width": 0, "height": 0, "fps": 30,
-                "has_audio": True,
-            })
         else:
-            # Video file: full ffprobe metadata
-            info = await asyncio.to_thread(get_video_info, save_path)
-            results.append({
-                "file_path": save_path, "file_name": os.path.basename(save_path),
-                "size": os.path.getsize(save_path),
-                "duration": (info or {}).get("duration", 0),
-                "width": (info or {}).get("width", 0),
-                "height": (info or {}).get("height", 0),
-                "fps": (info or {}).get("fps", 30),
-                "has_audio": (info or {}).get("has_audio", False),
-            })
+            # Audio/video: batch-probed after the whole upload finishes
+            pending.append({"save_path": save_path, "file_name": os.path.basename(save_path),
+                             "size": size, "ext": ext})
+
+    if pending:
+        probe_map = await asyncio.to_thread(
+            probe_video_info_batch, [p["save_path"] for p in pending], 4
+        )
+        for p in pending:
+            info = probe_map.get(p["save_path"]) or {}
+            if p["ext"] in audio_exts:
+                results.append({
+                    "file_path": p["save_path"], "file_name": p["file_name"],
+                    "size": p["size"],
+                    "duration": info.get("duration", 0),
+                    "width": 0, "height": 0, "fps": 30,
+                    "has_audio": True,
+                })
+            else:
+                results.append({
+                    "file_path": p["save_path"], "file_name": p["file_name"],
+                    "size": p["size"],
+                    "duration": info.get("duration", 0),
+                    "width": info.get("width", 0),
+                    "height": info.get("height", 0),
+                    "fps": info.get("fps", 30),
+                    "has_audio": info.get("has_audio", False),
+                })
     return web.json_response({"files": results})
 
 

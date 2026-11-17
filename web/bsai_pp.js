@@ -66,6 +66,26 @@ function isAutoImportAllowed(cls) {
     return !!cls.hasVideoStream && !!cls.hasAudio;
 }
 
+// Probe many files in a single request; the server bounds ffprobe concurrency
+// internally. Shared by the AutoImporter poller and the TimelineEditor so both
+// avoid N sequential per-file metadata round trips. Returns { path: info|null }.
+async function fetchMetadataBatch(paths) {
+    const unique = [...new Set((paths || []).filter(Boolean))];
+    if (unique.length === 0) return {};
+    try {
+        const resp = await api.fetchApi("/bsai_premiere_pro/metadata_batch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ files: unique }),
+        });
+        const data = await resp.json();
+        return data.metadata || {};
+    } catch (e) {
+        console.error("[BSAI PP] batch metadata failed:", e);
+        return {};
+    }
+}
+
 // Write a value into a node widget and reflect it into the native DOM control.
 // LiteGraph does NOT update the visible input when `widget.value` is assigned
 // directly, so the input element and callback must be refreshed manually;
@@ -557,7 +577,7 @@ const STYLES = `
 .bsai-pp-history-item .hist-del { color: #d35454; cursor: pointer; padding: 2px 4px; }
 .bsai-pp-history-item .hist-del:hover { background: #d35454; color: #fff; border-radius: 3px; }
 
-.bsai-pp-ctx-menu { position: fixed; z-index: 99999; min-width: 200px; background: #2a2a2a; border: 1px solid #444; border-radius: 6px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); padding: 4px 0; font-size: 13px; color: #ddd; user-select: none; }
+.bsai-pp-ctx-menu { position: fixed; z-index: 100020; min-width: 200px; background: #2a2a2a; border: 1px solid #444; border-radius: 6px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); padding: 4px 0; font-size: 13px; color: #ddd; user-select: none; }
 .bsai-pp-ctx-menu .ctx-item { padding: 8px 14px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
 .bsai-pp-ctx-menu .ctx-item:hover { background: #3a3a3a; color: #fff; }
 .bsai-pp-ctx-menu .ctx-item.danger { color: #ff6b6b; }
@@ -1104,11 +1124,11 @@ class AutoImporter {
         const newFiles = files.filter(f => !known.has(f.file_name) && !deleted.has(f.file_name));
         if (newFiles.length === 0) return;
         let skipped = 0;
+        const metaMap = await fetchMetadataBatch(newFiles.map(f => f.file_path));
         for (const file of newFiles) {
             try {
-                const metaResp = await api.fetchApi(`/bsai_premiere_pro/metadata?file=${encodeURIComponent(file.file_path)}`);
-                const meta = await metaResp.json();
-                if (meta.error) { console.warn("[BSAI PP]", meta.error); continue; }
+                const meta = metaMap[file.file_path];
+                if (!meta) { console.warn("[BSAI PP]", "No metadata for", file.file_name); continue; }
                 if (td.filter_audio_only && !meta.has_audio) {
                     td.known_files.push(file.file_name);
                     skipped++;
@@ -2362,6 +2382,12 @@ class TimelineEditor {
         const rulerMarks = ruler.querySelector(".bsai-pp-ruler-marks");
         if (rulerMarks) {
             rulerMarks.style.cursor = "pointer";
+            // 时间刻度尺上的空白处也接受右键（只给全局收拢 / 删除选中）
+            rulerMarks.addEventListener("contextmenu", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this._showTimelineContextMenu(e, null, null, null);
+            });
             rulerMarks.addEventListener("click", (e) => {
                 // Use trackContainer's rect (already accounts for scroll) to get
                 // accurate click position, then subtract SPACER_W to get playhead time.
@@ -2411,6 +2437,12 @@ class TimelineEditor {
         captureArea.className = "bsai-pp-track-content";
         captureArea.style.cssText = "min-height: 100px; background: transparent; border: none; cursor: crosshair;";
         this._attachBoxSelection(captureArea, null, null);
+        // 轨道下方的空白区也接受右键：直接给出全局收拢选项
+        captureArea.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this._showTimelineContextMenu(e, null, null, null);
+        });
         container.appendChild(captureArea);
 
         if (clips.length === 0) {
@@ -2609,6 +2641,10 @@ class TimelineEditor {
                     spacer.style.width = Math.max(0, Math.round(gapDur * (this._pps || 15))) + "px";
                     spacer.style.flexShrink = "0";
                     spacer.style.minWidth = "0";
+                    // 记录这段空隙的精确时间范围：右键点到空隙时按它来收拢，
+                    // 不依赖「像素→秒」换算，缩放/滚动偏移都不会算错。
+                    spacer.dataset.gapStart = String(currentTime);
+                    spacer.dataset.gapEnd = String(clipStart);
                     content.appendChild(spacer);
                 }
                 const clipIdx = this.td.clips.indexOf(clip);
@@ -2638,7 +2674,13 @@ class TimelineEditor {
         content.addEventListener("contextmenu", (e) => {
             if (e.target.closest("[data-clip-idx]")) return; // clip handles its own
             const rect = content.getBoundingClientRect();
-            const cursorTime = Math.max(0, (e.clientX - rect.left) / (this._pps || 15));
+            let cursorTime = Math.max(0, (e.clientX - rect.left) / (this._pps || 15));
+            // 点在空隙占位块上时，直接用该空隙的真实起点，避免像素换算误差
+            const gapEl = e.target.closest("[data-gap-start]");
+            if (gapEl) {
+                const gs = parseFloat(gapEl.dataset.gapStart);
+                if (Number.isFinite(gs)) cursorTime = gs;
+            }
             this._showTimelineContextMenu(e, trackType, trackIndex, cursorTime);
         });
         this._attachBoxSelection(content, trackType, trackIndex);
@@ -2801,25 +2843,13 @@ class TimelineEditor {
             this.td.known_files = [];
             this.td.deleted_files = [];
             this.selectedIndex = -1;
-            // Upload all media files to server
+            // Upload all media files to server (batched, concurrent probe)
             let imported = 0;
-            for (const file of mediaFiles) {
-                try {
-                    const formData = new FormData();
-                    formData.append("file", file, file.name);
-                    const resp = await api.fetchApi("/bsai_premiere_pro/upload", {
-                        method: "POST",
-                        body: formData,
-                    });
-                    const result = await resp.json();
-                    if (result.error) continue;
-                    const fileInfo = (result.files || [])[0];
-                    if (!fileInfo || fileInfo.error) continue;
-                    await this._addClipFromFile(fileInfo);
-                    imported++;
-                } catch (e) {
-                    // Skip failed files
-                }
+            const fileInfos = await this._uploadMediaFiles(mediaFiles);
+            for (const fileInfo of fileInfos) {
+                if (!fileInfo || fileInfo.error) continue;
+                await this._addClipFromFile(fileInfo);
+                imported++;
             }
             if (imported > 0) {
                 // Set watch directory to the upload directory
@@ -2950,15 +2980,15 @@ class TimelineEditor {
         const selected = await browseFilesDialog(initialPath);
         if (!selected || selected.length === 0) return;
         this._toast(`Importing ${selected.length} files...`, "info");
+        const metaMap = await this._fetchMetadataBatch(selected.map(f => f.path));
         let imported = 0;
         for (const file of selected) {
             try {
                 if (file.type === "video") {
-                    // Get video metadata
-                    const metaResp = await api.fetchApi(`/bsai_premiere_pro/metadata?file=${encodeURIComponent(file.path)}`);
-                    const meta = await metaResp.json();
-                    if (meta.error) {
-                        this._toast(`Cannot read ${file.name}: ${meta.error}`, "error");
+                    // Use batched metadata
+                    const meta = metaMap[file.path];
+                    if (!meta) {
+                        this._toast(`Cannot read ${file.name}`, "error");
                         continue;
                     }
                     await this._addClipFromFile({
@@ -2973,13 +3003,10 @@ class TimelineEditor {
                     });
                     imported++;
                 } else if (file.type === "audio") {
-                    // Fetch metadata for audio file to get correct duration
+                    // Duration comes from the batched metadata probe
                     let audioDuration = 0;
-                    try {
-                        const metaResp = await api.fetchApi(`/bsai_premiere_pro/metadata?file=${encodeURIComponent(file.path)}`);
-                        const meta = await metaResp.json();
-                        if (!meta.error) audioDuration = meta.duration || 0;
-                    } catch {}
+                    const aMeta = metaMap[file.path];
+                    if (aMeta) audioDuration = aMeta.duration || 0;
                     if (audioDuration === 0) audioDuration = 5;
                     // Find the audio track with the latest end time across all tracks
                     const audioTracksList = this.td.audio_tracks || [{ name: "A1", locked: false }];
@@ -5525,9 +5552,12 @@ class TimelineEditor {
                 const deleted = new Set(this.td.deleted_files || []);
                 const newFiles = data.files.filter(f => !known.has(f.file_name) && !deleted.has(f.file_name));
                 if (newFiles.length > 0) {
+                    const metaMap = await this._fetchMetadataBatch(newFiles.map(f => f.file_path));
                     let added = 0;
                     for (const file of newFiles) {
-                        const ok = await this._addClipFromFile(file, { auto: true });
+                        const meta = metaMap[file.file_path] || {};
+                        const enriched = { ...file, ...meta };
+                        const ok = await this._addClipFromFile(enriched, { auto: true });
                         if (ok) added++;
                     }
                     this._autoLinkClips();
@@ -5548,6 +5578,50 @@ class TimelineEditor {
         } catch (e) {
             this._toast("Scan failed: " + e.message, "error");
         }
+    }
+
+    async _fetchMetadataBatch(paths) {
+        return fetchMetadataBatch(paths);
+    }
+
+    async _uploadMediaFiles(files) {
+        // Upload files in size-batched multipart requests (ComfyUI caps one
+        // request at 100 MB); the server probes metadata concurrently.
+        const MAX_BATCH_BYTES = 90 * 1024 * 1024;
+        const infos = [];
+        const batches = [];
+        let current = [];
+        let currentSize = 0;
+        for (const file of files) {
+            const sz = file.size || 0;
+            if (current.length > 0 && currentSize + sz > MAX_BATCH_BYTES) {
+                batches.push(current);
+                current = [];
+                currentSize = 0;
+            }
+            current.push(file);
+            currentSize += sz;
+        }
+        if (current.length) batches.push(current);
+        for (const batch of batches) {
+            try {
+                const formData = new FormData();
+                for (const file of batch) formData.append("file", file, file.name);
+                const resp = await api.fetchApi("/bsai_premiere_pro/upload", {
+                    method: "POST",
+                    body: formData,
+                });
+                const result = await resp.json();
+                if (result.error) {
+                    this._toast(`Upload failed: ${result.error}`, "error");
+                    continue;
+                }
+                for (const fi of (result.files || [])) infos.push(fi);
+            } catch (e) {
+                this._toast(`Upload failed: ${e.message}`, "error");
+            }
+        }
+        return infos;
     }
 
     async _addClipFromFile(file, opts = {}) {
@@ -5670,33 +5744,21 @@ class TimelineEditor {
             const files = Array.from(input.files || []);
             document.body.removeChild(input);
             if (files.length === 0) return;
-            this._toast(`Uploading ${files.length} files...`, "info");
+            const extRe = /\.(mp4|avi|mov|mkv|webm|flv|wmv|m4v|mpg|mpeg|ts|3gp|mp3|wav|aac|flac|ogg|m4a|wma|opus|png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i;
+            const accepted = files.filter(f => extRe.test(f.name));
+            const skippedCount = files.length - accepted.length;
+            if (skippedCount > 0) {
+                this._toast(`Skipped ${skippedCount} unsupported file(s)`, "error");
+            }
+            this._toast(`Uploading ${accepted.length} files...`, "info");
             let imported = 0;
             let lastClipId = null;
             const prevScrollLeft = this.modal.querySelector("[data-track-content]")?.scrollLeft || 0;
-            for (const file of files) {
-                const isVideo = /\.(mp4|avi|mov|mkv|webm|flv|wmv|m4v|mpg|mpeg|ts|3gp)$/i.test(file.name);
-                const isAudio = /\.(mp3|wav|aac|flac|ogg|m4a|wma|opus)$/i.test(file.name);
-                const isImage = /\.(png|jpg|jpeg|bmp|gif|webp|tiff?|svg)$/i.test(file.name);
-                if (!isVideo && !isAudio && !isImage) {
-                    this._toast(`Skipped unsupported file: ${file.name}`, "error");
-                    continue;
-                }
-                try {
-                    const formData = new FormData();
-                    formData.append("file", file, file.name);
-                    const resp = await api.fetchApi("/bsai_premiere_pro/upload", {
-                        method: "POST",
-                        body: formData,
-                    });
-                    const result = await resp.json();
-                    if (result.error) {
-                        this._toast(`Upload of ${file.name} failed: ${result.error}`, "error");
-                        continue;
-                    }
-                    const fileInfo = (result.files || [])[0];
+            if (accepted.length > 0) {
+                const fileInfos = await this._uploadMediaFiles(accepted);
+                for (const fileInfo of fileInfos) {
                     if (!fileInfo || fileInfo.error) {
-                        this._toast(`Upload of ${file.name} failed: ${fileInfo?.error || "no response"}`, "error");
+                        this._toast(`Upload of ${fileInfo?.file_name || "file"} failed: ${fileInfo?.error || "no response"}`, "error");
                         continue;
                     }
                     // Track the clip ID for selection
@@ -5706,8 +5768,6 @@ class TimelineEditor {
                         lastClipId = this.td.clips[this.td.clips.length - 1].id;
                     }
                     imported++;
-                } catch (e) {
-                    this._toast(`Failed to import ${file.name}: ${e.message}`, "error");
                 }
             }
             if (imported > 0) {
@@ -5776,8 +5836,10 @@ class TimelineEditor {
             if (toImport.length === 0) { this._toast("Select at least one file", "info"); return; }
             overlay.remove();
             this._toast(`Importing ${toImport.length} videos...`, "info");
+            const metaMap = await this._fetchMetadataBatch(toImport.map(f => f.file_path));
             for (const file of toImport) {
-                await this._addClipFromFile(file);
+                const meta = metaMap[file.file_path] || {};
+                await this._addClipFromFile({ ...file, ...meta });
             }
             this._save();
             this._renderAll();
@@ -5968,20 +6030,41 @@ class TimelineEditor {
         this._closeContextMenu();
         const menu = document.createElement('div');
         menu.className = 'bsai-pp-ctx-menu';
-        menu.style.left = e.clientX + 'px';
-        menu.style.top = e.clientY + 'px';
-        const trackLabel = trackType === 'video' ? '视频轨' : '音频轨';
-        const hereItem = (typeof cursorTime === "number")
+        // 关键：.bsai-pp-overlay 的 z-index 是 100000，菜单如果挂在 body 上却比它低，
+        // 就会被整块遮罩压在下面 —— 菜单其实弹了，用户看不见，表现成「右键没反应」。
+        // 这里显式抬到遮罩之上（同时高于 transition popup 100010 / 对话框 100002）。
+        menu.style.zIndex = '100020';
+        const hasTrack = (trackType === 'video' || trackType === 'audio') && Number.isInteger(trackIndex);
+        const trackLabel = trackType === 'video' ? '视频轨' : (trackType === 'audio' ? '音频轨' : '');
+        const hereItem = (hasTrack && typeof cursorTime === "number")
             ? `<div class="ctx-item" data-act="close-gap-here"><span class="ctx-icon">⇤</span>删除此段空隙（后方片段前移）</div>`
+            : "";
+        const trackItem = hasTrack
+            ? `<div class="ctx-item" data-act="close-gap-track"><span class="ctx-icon">⇤</span>删除段间空隙（当前${trackLabel}）</div>`
             : "";
         menu.innerHTML = `
             ${hereItem}
-            <div class="ctx-item" data-act="close-gap-track"><span class="ctx-icon">⇤</span>删除段间空隙（当前${trackLabel}）</div>
+            ${trackItem}
             <div class="ctx-item" data-act="close-gap-all"><span class="ctx-icon">⇤</span>删除全部段间空隙</div>
             <div class="ctx-sep"></div>
             <div class="ctx-item danger" data-act="delete-selected"><span class="ctx-icon">🗑</span>删除选中片段</div>
         `;
+        // 先隐藏挂上去量尺寸，再夹到视口内，避免贴边时菜单跑到屏幕外
+        menu.style.visibility = 'hidden';
+        menu.style.left = '0px';
+        menu.style.top = '0px';
         document.body.appendChild(menu);
+        const mw = menu.offsetWidth || 220;
+        const mh = menu.offsetHeight || 160;
+        const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+        const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+        let x = e.clientX;
+        let y = e.clientY;
+        if (vw && x + mw > vw - 8) x = Math.max(8, vw - mw - 8);
+        if (vh && y + mh > vh - 8) y = Math.max(8, vh - mh - 8);
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.style.visibility = 'visible';
         menu.querySelectorAll('.ctx-item').forEach(item => {
             item.onclick = (ev) => {
                 ev.stopPropagation();
@@ -6014,8 +6097,20 @@ class TimelineEditor {
         const closeHandler = (ev) => {
             if (menu && !menu.contains(ev.target)) this._closeContextMenu();
         };
-        setTimeout(() => document.addEventListener('mousedown', closeHandler), 10);
+        const keyHandler = (ev) => {
+            if (ev.key === 'Escape') this._closeContextMenu();
+        };
+        const scrollHandler = () => this._closeContextMenu();
+        setTimeout(() => {
+            document.addEventListener('mousedown', closeHandler);
+            document.addEventListener('keydown', keyHandler);
+            // 滚动/改窗口尺寸时菜单会脱离原位，直接关掉
+            document.addEventListener('scroll', scrollHandler, true);
+            window.addEventListener('resize', scrollHandler);
+        }, 10);
         this._ctxMenuCloseHandler = closeHandler;
+        this._ctxMenuKeyHandler = keyHandler;
+        this._ctxMenuScrollHandler = scrollHandler;
     }
 
     _closeContextMenu() {
@@ -6026,6 +6121,15 @@ class TimelineEditor {
         if (this._ctxMenuCloseHandler) {
             document.removeEventListener('mousedown', this._ctxMenuCloseHandler);
             this._ctxMenuCloseHandler = null;
+        }
+        if (this._ctxMenuKeyHandler) {
+            document.removeEventListener('keydown', this._ctxMenuKeyHandler);
+            this._ctxMenuKeyHandler = null;
+        }
+        if (this._ctxMenuScrollHandler) {
+            document.removeEventListener('scroll', this._ctxMenuScrollHandler, true);
+            window.removeEventListener('resize', this._ctxMenuScrollHandler);
+            this._ctxMenuScrollHandler = null;
         }
     }
 

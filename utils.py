@@ -7,6 +7,8 @@ import tempfile
 import time
 import base64
 import wave
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".wmv", ".m4v", ".mpg", ".mpeg", ".ts", ".3gp"}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".wma", ".opus"}
@@ -187,7 +189,43 @@ def get_upscale_model_list():
         return ["realesr-general-x4v3.pth", "RealESRGAN_x4plus.pth", "RealESRGAN_x4plus_anime_6B.pth"]
 
 
+# Metadata cache keyed by (absolute path, size, mtime_ns). Repeated scans /
+# polls re-probe the same files; caching avoids respawning ffprobe each time.
+_META_CACHE = {}
+_META_CACHE_LOCK = threading.Lock()
+_META_CACHE_MAX = 512
+
+
+def _meta_cache_key(file_path):
+    try:
+        st = os.stat(file_path)
+        return (os.path.abspath(file_path), st.st_size, st.st_mtime_ns)
+    except OSError:
+        return None
+
+
 def get_video_info(file_path):
+    if not file_path or not os.path.exists(file_path):
+        return None
+    key = _meta_cache_key(file_path)
+    if key is not None:
+        with _META_CACHE_LOCK:
+            cached = _META_CACHE.get(key)
+        if cached is not None:
+            return cached
+    info = _probe_video_info(file_path)
+    if info is not None and key is not None:
+        with _META_CACHE_LOCK:
+            if len(_META_CACHE) >= _META_CACHE_MAX:
+                try:
+                    _META_CACHE.pop(next(iter(_META_CACHE)))
+                except StopIteration:
+                    pass
+            _META_CACHE[key] = info
+    return info
+
+
+def _probe_video_info(file_path):
     ffprobe = get_ffprobe()
     if not ffprobe or not os.path.exists(file_path):
         return None
@@ -245,6 +283,19 @@ def get_video_info(file_path):
     except Exception as e:
         print(f"[BSAI Premiere Pro] Error getting video info: {e}")
         return None
+
+
+def probe_video_info_batch(paths, max_workers=4):
+    """Probe multiple media files concurrently; returns {path: info|None}."""
+    unique_paths = [p for p in dict.fromkeys(paths) if p]
+    if not unique_paths:
+        return {}
+    workers = max(1, min(int(max_workers), len(unique_paths)))
+    out = {}
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        for path, info in zip(unique_paths, executor.map(get_video_info, unique_paths)):
+            out[path] = info
+    return out
 
 
 def generate_thumbnail(file_path, thumb_time=None, width=160):
