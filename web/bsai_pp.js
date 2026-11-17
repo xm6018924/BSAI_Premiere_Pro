@@ -6035,19 +6035,19 @@ class TimelineEditor {
         // 这里显式抬到遮罩之上（同时高于 transition popup 100010 / 对话框 100002）。
         menu.style.zIndex = '100020';
         const hasTrack = (trackType === 'video' || trackType === 'audio') && Number.isInteger(trackIndex);
-        const trackLabel = trackType === 'video' ? '视频轨' : (trackType === 'audio' ? '音频轨' : '');
+        const trackLabel = trackType === 'video' ? 'video track' : (trackType === 'audio' ? 'audio track' : '');
         const hereItem = (hasTrack && typeof cursorTime === "number")
-            ? `<div class="ctx-item" data-act="close-gap-here"><span class="ctx-icon">⇤</span>删除此段空隙（后方片段前移）</div>`
+            ? `<div class="ctx-item" data-act="close-gap-here"><span class="ctx-icon">⇤</span>Close this gap (shift later clips left)</div>`
             : "";
         const trackItem = hasTrack
-            ? `<div class="ctx-item" data-act="close-gap-track"><span class="ctx-icon">⇤</span>删除段间空隙（当前${trackLabel}）</div>`
+            ? `<div class="ctx-item" data-act="close-gap-track"><span class="ctx-icon">⇤</span>Close gaps on ${trackLabel}</div>`
             : "";
         menu.innerHTML = `
             ${hereItem}
             ${trackItem}
-            <div class="ctx-item" data-act="close-gap-all"><span class="ctx-icon">⇤</span>删除全部段间空隙</div>
+            <div class="ctx-item" data-act="close-gap-all"><span class="ctx-icon">⇤</span>Close all gaps</div>
             <div class="ctx-sep"></div>
-            <div class="ctx-item danger" data-act="delete-selected"><span class="ctx-icon">🗑</span>删除选中片段</div>
+            <div class="ctx-item danger" data-act="delete-selected"><span class="ctx-icon">🗑</span>Delete selected clip</div>
         `;
         // 先隐藏挂上去量尺寸，再夹到视口内，避免贴边时菜单跑到屏幕外
         menu.style.visibility = 'hidden';
@@ -6073,22 +6073,22 @@ class TimelineEditor {
                 if (act === 'close-gap-here') {
                     const n = this._closeGapAtTime(trackType, trackIndex, cursorTime);
                     this._save(); this._renderAll();
-                    this._toast(n > 0 ? `已删除空隙，前移 ${n} 个片段` : '此处没有可删除的空隙', n > 0 ? 'success' : 'info');
+                    this._toast(n > 0 ? `Gap closed, ${n} clip(s) shifted left` : 'No gap to close here', n > 0 ? 'success' : 'info');
                 } else if (act === 'close-gap-track') {
                     const n = this._closeGapsOnTrack(trackType, trackIndex);
                     this._save(); this._renderAll();
-                    this._toast(n > 0 ? `已收拢${trackLabel}空隙，移动 ${n} 个片段` : `${trackLabel}已对齐`, n > 0 ? 'success' : 'info');
+                    this._toast(n > 0 ? `Closed gaps on ${trackLabel}, ${n} clip(s) moved` : `${trackLabel} aligned`, n > 0 ? 'success' : 'info');
                 } else if (act === 'close-gap-all') {
                     const n = this._closeAllGaps();
                     this._save(); this._renderAll();
-                    this._toast(n > 0 ? `已收拢全部轨道空隙，移动 ${n} 个片段` : '所有轨道已对齐', n > 0 ? 'success' : 'info');
+                    this._toast(n > 0 ? `Closed gaps on all tracks, ${n} clip(s) moved` : 'All tracks aligned', n > 0 ? 'success' : 'info');
                 } else if (act === 'delete-selected') {
                     if (this.boxSelected.size > 0) {
                         this._deleteBoxSelected();
                     } else if (this.selectedIndex >= 0) {
                         this._deleteClip(this.selectedIndex);
                     } else {
-                        this._toast('未选中片段', 'info');
+                        this._toast('No clip selected', 'info');
                     }
                 }
             };
